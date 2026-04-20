@@ -347,24 +347,6 @@ UPEOSMS works well for:
 
 ---
 
-## Contributing
-
-This app uses `pre-commit` for code formatting and linting. Please [install pre-commit](https://pre-commit.com/#installation) and enable it for this repository:
-
-```bash
-cd apps/upeosms
-pre-commit install
-```
-
-Pre-commit is configured to use the following tools:
-
-- [ruff](https://docs.astral.sh/ruff/) — Python linting and formatting
-- [eslint](https://eslint.org/) — JavaScript linting
-- [prettier](https://prettier.io/) — Code formatting
-- [pyupgrade](https://github.com/asottile/pyupgrade) — Python syntax upgrades
-
----
-
 ## License
 
 MIT
