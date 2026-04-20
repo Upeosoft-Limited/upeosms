@@ -1,6 +1,7 @@
 {
  "actions": [],
  "allow_rename": 1,
+ "autoname": "format:{YY}-{MM}-{########}",
  "creation": "2026-04-20 10:20:39.206618",
  "doctype": "DocType",
  "engine": "InnoDB",
@@ -90,10 +91,11 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-04-20 10:23:58.997812",
+ "modified": "2026-04-20 12:43:24.114563",
  "modified_by": "Administrator",
  "module": "UPEOSMS",
  "name": "SMS Send Log",
+ "naming_rule": "Expression (old style)",
  "owner": "Administrator",
  "permissions": [
   {
