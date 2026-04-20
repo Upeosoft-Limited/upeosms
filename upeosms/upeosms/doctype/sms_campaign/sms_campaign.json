@@ -1,0 +1,140 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "format:{YY}{MM}{###}",
+ "creation": "2026-04-20 10:08:44.657578",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "campaign_name",
+  "message_template",
+  "detected_columns",
+  "preview_json",
+  "last_error",
+  "column_break_gymx",
+  "upload_file",
+  "status",
+  "total_recipients",
+  "queued_count",
+  "sent_count",
+  "failed_count",
+  "progress_percent",
+  "started_on",
+  "completed_on"
+ ],
+ "fields": [
+  {
+   "fieldname": "campaign_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "campaign_name"
+  },
+  {
+   "fieldname": "message_template",
+   "fieldtype": "Long Text",
+   "label": "message_template"
+  },
+  {
+   "fieldname": "detected_columns",
+   "fieldtype": "Small Text",
+   "label": "detected_columns"
+  },
+  {
+   "fieldname": "column_break_gymx",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "upload_file",
+   "fieldtype": "Attach",
+   "label": "upload_file"
+  },
+  {
+   "default": "Draft",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "status",
+   "options": "Draft\nReady\nQueued\nSending\nCompleted\nCompleted with Errors\nFailed"
+  },
+  {
+   "fieldname": "preview_json",
+   "fieldtype": "Code",
+   "label": "preview_json"
+  },
+  {
+   "fieldname": "last_error",
+   "fieldtype": "Small Text",
+   "label": "last_error"
+  },
+  {
+   "fieldname": "total_recipients",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "total_recipients"
+  },
+  {
+   "fieldname": "queued_count",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "queued_count"
+  },
+  {
+   "fieldname": "sent_count",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "sent_count"
+  },
+  {
+   "fieldname": "failed_count",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "failed_count"
+  },
+  {
+   "fieldname": "progress_percent",
+   "fieldtype": "Percent",
+   "in_list_view": 1,
+   "label": "progress_percent"
+  },
+  {
+   "fieldname": "started_on",
+   "fieldtype": "Datetime",
+   "label": "started_on"
+  },
+  {
+   "fieldname": "completed_on",
+   "fieldtype": "Datetime",
+   "label": "completed_on"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-04-20 10:13:34.218541",
+ "modified_by": "Administrator",
+ "module": "UPEOSMS",
+ "name": "SMS Campaign",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

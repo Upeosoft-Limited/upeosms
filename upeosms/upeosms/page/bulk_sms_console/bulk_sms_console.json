@@ -1,0 +1,19 @@
+{
+ "content": null,
+ "creation": "2026-04-20 10:40:55.242788",
+ "docstatus": 0,
+ "doctype": "Page",
+ "idx": 0,
+ "modified": "2026-04-20 10:40:55.242788",
+ "modified_by": "Administrator",
+ "module": "UPEOSMS",
+ "name": "bulk-sms-console",
+ "owner": "Administrator",
+ "page_name": "bulk-sms-console",
+ "roles": [],
+ "script": null,
+ "standard": "Yes",
+ "style": null,
+ "system_page": 0,
+ "title": "Bulk SMS Console"
+}
