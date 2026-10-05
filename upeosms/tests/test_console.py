@@ -4,6 +4,10 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from upeosms.api import page
+from upeosms.services.campaign_history import CampaignHistory
+from upeosms.services.campaign_report import CampaignReport
+from upeosms.services.campaign_retry import CampaignRetry
+from upeosms.services.console_settings import ConsoleSettings
 from upeosms.services.message_composer import MessageComposer
 from upeosms.services.quick_send import QuickSend
 from upeosms.services.sample_file import SampleRecipientFile
@@ -144,3 +148,163 @@ class TestConsoleEndpoints(IntegrationTestCase):
 				with self.assertRaises(frappe.PermissionError):
 					call()
 		post.assert_not_called()
+
+
+class TestConsoleSettings(IntegrationTestCase):
+	def tearDown(self):
+		frappe.db.set_single_value("UPEOSMS Settings", "sms_signature", None)
+
+	def test_saves_tidied_signature(self):
+		self.assertEqual(ConsoleSettings().save_signature("  KSF   Kitengela "), "KSF Kitengela")
+		self.assertEqual(MessageComposer.from_settings().signature, "KSF Kitengela")
+
+	def test_empty_clears_signature(self):
+		ConsoleSettings().save_signature("KSF")
+		self.assertEqual(ConsoleSettings().save_signature(""), "")
+		self.assertEqual(MessageComposer.from_settings().signature, "")
+
+	def test_rejects_long_signature(self):
+		with self.assertRaises(frappe.ValidationError):
+			ConsoleSettings().save_signature("x" * (ConsoleSettings.MAX_SIGNATURE + 1))
+
+	def test_needs_settings_write_permission(self):
+		with self.set_user("Guest"), self.assertRaises(frappe.PermissionError):
+			ConsoleSettings().save_signature("KSF")
+
+
+class TestCampaignReport(IntegrationTestCase):
+	def setUp(self):
+		self.campaign = frappe.get_doc(
+			{"doctype": "SMS Campaign", "campaign_name": "Report test", "status": "Completed with Errors"}
+		).insert(ignore_permissions=True)
+		statuses = ["Sent"] * 3 + ["Failed"] + ["Pending"]
+		for idx, status in enumerate(statuses, start=1):
+			frappe.get_doc(
+				{
+					"doctype": "SMS Recipient",
+					"campaign": self.campaign.name,
+					"row_index": idx,
+					"mobile": f"07000000{idx:02d}",
+					"status": status,
+					"error_message": "Traceback (most recent call last):\nValueError: Invalid Kenyan mobile number"
+					if status == "Failed"
+					else None,
+				}
+			).insert(ignore_permissions=True)
+
+	def tearDown(self):
+		frappe.db.delete("SMS Recipient", {"campaign": self.campaign.name})
+		frappe.db.delete("SMS Campaign", {"name": self.campaign.name})
+
+	def test_counts_by_status(self):
+		report = CampaignReport(self.campaign.name).as_dict()
+		self.assertEqual(report["counts"], {"Sent": 3, "Failed": 1, "Pending": 1})
+		self.assertEqual(len(report["recipients"]), 5)
+
+	def test_filters_and_shows_last_error_line(self):
+		report = CampaignReport(self.campaign.name).as_dict(status="Failed")
+		self.assertEqual([r.status for r in report["recipients"]], ["Failed"])
+		self.assertEqual(report["recipients"][0].error_message, "ValueError: Invalid Kenyan mobile number")
+
+	def test_unknown_filter_shows_everyone(self):
+		self.assertEqual(len(CampaignReport(self.campaign.name).as_dict(status="Nope")["recipients"]), 5)
+
+	def test_pages(self):
+		with patch.object(CampaignReport, "PAGE_SIZE", 2):
+			report = CampaignReport(self.campaign.name)
+			self.assertEqual(
+				[r.mobile for r in report.as_dict(start=2)["recipients"]], ["0700000003", "0700000004"]
+			)
+
+	def test_missing_campaign(self):
+		with self.assertRaises(frappe.DoesNotExistError):
+			CampaignReport("no-such-campaign")
+
+	def test_endpoint_refuses_guests(self):
+		with self.set_user("Guest"), self.assertRaises(frappe.PermissionError):
+			page.get_campaign_detail(self.campaign.name)
+
+	def test_results_export_lists_every_recipient(self):
+		from io import BytesIO
+
+		from openpyxl import load_workbook
+
+		report = CampaignReport(self.campaign.name)
+		sheet = load_workbook(BytesIO(report.results_xlsx())).active
+		rows = list(sheet.iter_rows(values_only=True))
+		self.assertEqual(rows[0][:3], ("Mobile", "Name", "Status"))
+		self.assertEqual(len(rows), 6)
+		self.assertEqual(rows[4][4], "ValueError: Invalid Kenyan mobile number")
+		self.assertEqual(report.results_filename, "report_test_results.xlsx")
+
+
+class TestCampaignRetry(IntegrationTestCase):
+	def setUp(self):
+		self.campaign = frappe.get_doc(
+			{"doctype": "SMS Campaign", "campaign_name": "Retry test", "status": "Completed with Errors"}
+		).insert(ignore_permissions=True)
+		for idx, status in enumerate(["Sent", "Failed", "Failed"], start=1):
+			frappe.get_doc(
+				{
+					"doctype": "SMS Recipient",
+					"campaign": self.campaign.name,
+					"row_index": idx,
+					"mobile": "0712345678",
+					"status": status,
+					"error_message": "boom" if status == "Failed" else None,
+				}
+			).insert(ignore_permissions=True)
+
+	def tearDown(self):
+		frappe.db.delete("SMS Recipient", {"campaign": self.campaign.name})
+		frappe.db.delete("SMS Campaign", {"name": self.campaign.name})
+		frappe.db.commit()
+
+	def test_requeues_only_failed(self):
+		with patch("upeosms.services.campaign_retry.enqueue_campaign_send") as enqueue:
+			self.assertEqual(CampaignRetry(self.campaign.name).run(), 2)
+		enqueue.assert_called_once_with(self.campaign.name)
+		statuses = frappe.get_all("SMS Recipient", {"campaign": self.campaign.name}, pluck="status")
+		self.assertEqual(sorted(statuses), ["Pending", "Pending", "Sent"])
+		self.assertEqual(frappe.db.get_value("SMS Campaign", self.campaign.name, "status"), "Queued")
+
+	def test_refuses_while_sending(self):
+		self.campaign.db_set("status", "Sending")
+		with patch("upeosms.services.campaign_retry.enqueue_campaign_send") as enqueue:
+			with self.assertRaises(frappe.ValidationError):
+				CampaignRetry(self.campaign.name).run()
+		enqueue.assert_not_called()
+
+	def test_refuses_when_nothing_failed(self):
+		frappe.db.set_value("SMS Recipient", {"campaign": self.campaign.name}, "status", "Sent")
+		with self.assertRaises(frappe.ValidationError):
+			CampaignRetry(self.campaign.name).run()
+
+
+class TestCampaignHistory(IntegrationTestCase):
+	def setUp(self):
+		self.names = [
+			frappe.get_doc({"doctype": "SMS Campaign", "campaign_name": name, "status": status})
+			.insert(ignore_permissions=True)
+			.name
+			for name, status in (("History alpha", "Completed"), ("History beta", "Failed"))
+		]
+
+	def tearDown(self):
+		frappe.db.delete("SMS Campaign", {"name": ["in", self.names]})
+
+	def test_search_and_status(self):
+		names = [c.campaign_name for c in CampaignHistory("History").page()["campaigns"]]
+		self.assertIn("History alpha", names)
+		self.assertIn("History beta", names)
+		failed = [c.campaign_name for c in CampaignHistory("History", "Failed").page()["campaigns"]]
+		self.assertEqual(failed, ["History beta"])
+
+	def test_unknown_status_is_ignored(self):
+		self.assertEqual(len(CampaignHistory("History", "Bogus").page()["campaigns"]), 2)
+
+	def test_has_more(self):
+		with patch.object(CampaignHistory, "PAGE_SIZE", 1):
+			page_one = CampaignHistory("History").page()
+		self.assertEqual(len(page_one["campaigns"]), 1)
+		self.assertTrue(page_one["has_more"])

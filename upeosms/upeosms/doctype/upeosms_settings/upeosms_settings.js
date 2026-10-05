@@ -4,6 +4,10 @@
 frappe.ui.form.on("UPEOSMS Settings", {
 	refresh(frm) {
 		frm.events.render_sender(frm);
+		// Settings are edited in the SMS console's Settings tab. Replace the
+		// history entry so Back does not bounce between this form and the console.
+		frappe.route_flags.replace_route = true;
+		frappe.set_route("bulk-sms-console", "settings");
 	},
 
 	render_sender(frm) {

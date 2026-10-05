@@ -1,7 +1,12 @@
 frappe.provide("upeosms.bulk_sms");
 
 frappe.pages["bulk-sms-console"].on_page_load = function (wrapper) {
-	new UpeoSmsConsole(wrapper);
+	wrapper.usms_console = new UpeoSmsConsole(wrapper);
+};
+
+// Desk screens for campaigns and settings send people here with route options.
+frappe.pages["bulk-sms-console"].on_page_show = function (wrapper) {
+	wrapper.usms_console?.apply_route();
 };
 
 const USMS_ICONS = {
@@ -225,17 +230,18 @@ class UsmsCampaignStatus {
 	}
 }
 
-/** The last few campaigns, linking to their records. */
+/** The last few campaigns; each opens its details inside the console. */
 class UsmsRecentCampaigns {
-	constructor($root) {
+	constructor($root, on_open) {
 		this.$root = $root;
+		$root.on("click", "[data-campaign]", (e) => on_open($(e.currentTarget).data("campaign")));
 	}
 
 	render(campaigns) {
 		const rows = (campaigns || [])
 			.map(
 				(c) => `
-				<a class="usms-list-item" href="/app/sms-campaign/${encodeURIComponent(c.name)}">
+				<button type="button" class="usms-list-item" data-campaign="${esc(c.name)}">
 					<div class="usms-list-main">
 						<div class="usms-list-title">${esc(c.campaign_name || c.name)}</div>
 						<div class="usms-list-sub">${__("{0} of {1} sent", [cint(c.sent_count), cint(c.total_recipients)])} · ${esc(
@@ -243,12 +249,16 @@ class UsmsRecentCampaigns {
 						)}</div>
 					</div>
 					<span class="usms-status-pill ${(USMS_STATUS_COLOURS[c.status] || "").replace("live", "")}">${esc(__(c.status))}</span>
-				</a>`
+				</button>`
 			)
 			.join("");
 		this.$root.html(`
 			<div class="usms-card">
-				<div class="usms-card-head"><div><h2>${__("Recent campaigns")}</h2></div></div>
+				<div class="usms-card-head">
+					<div><h2>${__("Recent campaigns")}</h2></div>
+					<div class="usms-spacer"></div>
+					<button type="button" class="usms-link-btn usms-see-all">${__("See all")}</button>
+				</div>
 				<div class="usms-list">${rows || `<div class="usms-empty">${__("No campaigns yet.")}</div>`}</div>
 			</div>
 		`);
@@ -684,6 +694,375 @@ class UsmsQuickPanel {
 	}
 }
 
+/** Sender ID and signature, edited here instead of the desk settings form. */
+class UsmsSettingsPanel {
+	constructor($root, console) {
+		this.$root = $root;
+		this.console = console;
+		this.render();
+		this.bind();
+	}
+
+	render() {
+		const sender = this.console.sender;
+		const about = {
+			own: [__("Own account"), __("This site sends from its own TextSMS account. No other site can send as this name.")],
+			shared: [
+				__("Shared account"),
+				__("This site uses the server-wide TextSMS account, so other sites may send as this name too."),
+			],
+			missing: [__("Not set up"), __("No TextSMS account is set up for this site yet, so nothing can be sent.")],
+		}[sender.source] || ["", ""];
+		const colour = { own: "green", shared: "orange", missing: "red" }[sender.source] || "";
+		const limit = this.console.signature_limit;
+		const locked = !this.console.can_edit_settings;
+		this.$root.html(`
+			<div class="usms-card usms-sender-card">
+				<div class="usms-sender-id">
+					<div class="usms-avatar usms-avatar-lg">${esc((sender.sender_id || "?").charAt(0))}</div>
+					<div>
+						<div class="usms-eyebrow">${__("Sender ID")}</div>
+						<div class="usms-sender-name">${esc(sender.sender_id || __("Not set"))}</div>
+					</div>
+					<div class="usms-spacer"></div>
+					<span class="usms-status-pill ${colour}">${esc(about[0])}</span>
+				</div>
+				<p class="usms-sender-about">${esc(about[1])} ${__(
+					"This is the name people see as the sender. Your server administrator sets it."
+				)}</p>
+			</div>
+
+			<div class="usms-card">
+				<div class="usms-card-head">
+					<div><h2>${__("Signature")}</h2><p>${__(
+						"Added on its own line at the end of every SMS sent from this console."
+					)}</p></div>
+				</div>
+				<label class="usms-label">${__("Sign messages as")}</label>
+				<input class="usms-input usms-signature" type="text" maxlength="${limit}"
+					placeholder="${__("e.g. KSF Kitengela")}" ${locked ? "disabled" : ""}>
+				<div class="usms-meta">
+					<span>${locked ? __("Only a System Manager can change this.") : __("Leave empty to send without a signature.")}</span>
+					<span class="usms-sig-count"></span>
+				</div>
+				<div class="usms-notice usms-settings-notice"></div>
+				<div class="usms-actions">
+					<button class="usms-btn usms-sig-reset" disabled>${__("Undo changes")}</button>
+					<button class="usms-btn primary usms-sig-save" disabled><span>${__("Save signature")}</span></button>
+				</div>
+			</div>
+		`);
+		this.$input = this.$root.find(".usms-signature");
+		this.$save = this.$root.find(".usms-sig-save");
+		this.$reset = this.$root.find(".usms-sig-reset");
+	}
+
+	bind() {
+		this.$input.on("input", () => this.refresh());
+		this.$input.on("keydown", (e) => e.key === "Enter" && !this.$save.prop("disabled") && this.save());
+		this.$save.on("click", () => this.save());
+		this.$reset.on("click", () => {
+			this.$input.val(this.console.signature);
+			this.refresh();
+		});
+	}
+
+	on_show() {
+		this.$input.val(this.console.signature);
+		this.notice("");
+		this.refresh();
+	}
+
+	value() {
+		return this.$input.val().replace(/\s+/g, " ").trim();
+	}
+
+	refresh() {
+		const changed = this.value() !== this.console.signature;
+		this.$root.find(".usms-sig-count").text(`${this.$input.val().length} / ${this.console.signature_limit}`);
+		this.$save.prop("disabled", !changed);
+		this.$reset.prop("disabled", !changed);
+		this.console.phone.show(__("Your message goes here."), this.value(), __("Preview with this signature"));
+	}
+
+	notice(text, kind = "ok") {
+		this.$root
+			.find(".usms-settings-notice")
+			.attr("class", `usms-notice usms-settings-notice ${text ? `show ${kind}` : ""}`)
+			.text(text || "");
+	}
+
+	async save() {
+		this.$save.addClass("loading");
+		try {
+			const r = await UsmsApi.call("save_signature", { signature: this.value() });
+			this.console.signature = r.signature || "";
+			this.$input.val(this.console.signature);
+			this.notice(this.console.signature ? __("Saved. New messages will be signed.") : __("Saved. Messages go out unsigned."));
+			this.refresh();
+		} catch (error) {
+			this.notice(error, "error");
+		} finally {
+			this.$save.removeClass("loading");
+		}
+	}
+}
+
+/** One campaign's results and recipients, instead of the desk record. */
+class UsmsCampaignPanel {
+	static FILTERS = ["", "Sent", "Failed", "Pending"];
+
+	constructor($root, console) {
+		this.$root = $root;
+		this.console = console;
+		this.$root.on("click", ".usms-back", () => this.console.switch_tab(this.console.last_tab || "bulk"));
+		this.$root.on("click", "[data-filter]", (e) => this.load($(e.currentTarget).data("filter")));
+		this.$root.on("click", ".usms-more", () => this.load(this.filter, true));
+		this.$root.on("click", ".usms-refresh", () => this.load(this.filter));
+		this.$root.on("click", ".usms-download", () =>
+			window.open(
+				`/api/method/upeosms.api.page.download_campaign_results?campaign_name=${encodeURIComponent(this.name)}`
+			)
+		);
+		this.$root.on("click", ".usms-retry", (e) => this.retry($(e.currentTarget)));
+		// While a campaign sends, the worker reports progress; reload at most every 2s.
+		const reload = frappe.utils.throttle(() => this.load(this.filter), 2000);
+		frappe.realtime.on("upeosms_campaign_progress", (data) => {
+			if (data?.campaign === this.name && this.$root.hasClass("active")) reload();
+		});
+	}
+
+	async retry($btn) {
+		if (!$btn.hasClass("danger")) {
+			$btn.addClass("danger").find("span").text(__("Confirm: send again"));
+			return;
+		}
+		$btn.addClass("loading");
+		try {
+			const r = await UsmsApi.call("retry_failed_recipients", { campaign_name: this.name });
+			frappe.show_alert({ message: r.message, indicator: "green" });
+			this.console.load_recent();
+			await this.load("");
+		} catch (error) {
+			$btn.removeClass("loading danger");
+			this.$root.find(".usms-detail-notice").attr("class", "usms-notice usms-detail-notice show error").text(error);
+		}
+	}
+
+	open(name) {
+		this.name = name;
+		this.$root.html(`<div class="usms-card"><div class="usms-empty">${__("Loading…")}</div></div>`);
+		this.load("");
+	}
+
+	on_show() {}
+
+	async load(filter, more = false) {
+		this.filter = filter || "";
+		const start = more ? this.rows.length : 0;
+		try {
+			const data = await UsmsApi.call("get_campaign_detail", {
+				campaign_name: this.name,
+				status: this.filter || null,
+				start,
+			});
+			this.data = data;
+			this.rows = more ? this.rows.concat(data.recipients) : data.recipients;
+			this.render();
+		} catch (error) {
+			this.$root.html(`<div class="usms-card"><div class="usms-notice show error">${esc(error)}</div></div>`);
+		}
+	}
+
+	render() {
+		const c = this.data.campaign;
+		const counts = this.data.counts || {};
+		const total = Object.values(counts).reduce((a, b) => a + b, 0);
+		const waiting = total - cint(counts.Sent) - cint(counts.Failed);
+		const filter_total = this.filter ? cint(counts[this.filter]) : total;
+		const live = ["Queued", "Sending"].includes(c.status);
+		const first = this.rows.find((r) => r.rendered_message);
+		this.console.phone.show(first?.rendered_message || "", "", first ? __("To {0}", [first.recipient_name || first.mobile]) : "");
+		this.$root.html(`
+			<div class="usms-card">
+				<div class="usms-detail-top">
+					<button class="usms-btn usms-back" type="button">← ${__("Back")}</button>
+					<div class="usms-spacer"></div>
+					${live ? `<button class="usms-btn usms-refresh" type="button">${__("Refresh")}</button>` : ""}
+					<button class="usms-btn usms-download" type="button">${USMS_ICONS.download} ${__("Download results")}</button>
+					${
+						cint(counts.Failed) && !live
+							? `<button class="usms-btn primary usms-retry" type="button">${USMS_ICONS.send} <span>${__(
+									"Retry {0} failed",
+									[cint(counts.Failed)]
+								)}</span></button>`
+							: ""
+					}
+				</div>
+				<div class="usms-notice usms-detail-notice"></div>
+				<div class="usms-detail-title">
+					<div>
+						<h2>${esc(c.campaign_name || c.name)}</h2>
+						<p>${esc(c.name)} · ${esc(frappe.datetime.str_to_user(c.started_on || c.creation))}</p>
+					</div>
+					<span class="usms-status-pill ${USMS_STATUS_COLOURS[c.status] || ""}">${esc(__(c.status))}</span>
+				</div>
+				<div class="usms-progress"><div class="usms-progress-fill" style="width:${flt(c.progress_percent)}%"></div></div>
+				<div class="usms-stats usms-stats-4">
+					<div class="usms-stat"><span>${__("People")}</span><strong>${total}</strong></div>
+					<div class="usms-stat sent"><span>${__("Sent")}</span><strong>${cint(counts.Sent)}</strong></div>
+					<div class="usms-stat failed"><span>${__("Failed")}</span><strong>${cint(counts.Failed)}</strong></div>
+					<div class="usms-stat"><span>${__("Waiting")}</span><strong>${waiting}</strong></div>
+				</div>
+				${
+					c.message_template
+						? `<div class="usms-template-box"><div class="usms-eyebrow">${__("Message")}</div>${esc(c.message_template)}</div>`
+						: ""
+				}
+			</div>
+
+			<div class="usms-card">
+				<div class="usms-card-head">
+					<div><h2>${__("Recipients")}</h2><p>${__("Showing {0} of {1}", [this.rows.length, filter_total])}</p></div>
+					<div class="usms-spacer"></div>
+					<div class="usms-segment">
+						${UsmsCampaignPanel.FILTERS.map(
+							(f) => `<button type="button" data-filter="${f}" class="${f === this.filter ? "active" : ""}">${
+								f ? __(f) : __("All")
+							} <em>${f ? cint(counts[f]) : total}</em></button>`
+						).join("")}
+					</div>
+				</div>
+				${this.recipients_table()}
+				${
+					this.rows.length < filter_total
+						? `<div class="usms-actions"><button class="usms-btn usms-more" type="button">${__("Show more")}</button></div>`
+						: ""
+				}
+			</div>
+		`);
+	}
+
+	recipients_table() {
+		if (!this.rows.length) return `<div class="usms-empty">${__("No one here.")}</div>`;
+		const rows = this.rows
+			.map(
+				(r) => `<tr>
+					<td class="num">${esc(r.mobile)}</td>
+					<td>${esc(r.recipient_name || "")}</td>
+					<td><span class="usms-status-pill ${(USMS_STATUS_COLOURS[r.status] || "").replace("live", "")}">${esc(__(r.status))}</span></td>
+					<td class="usms-muted-cell">${
+						r.status === "Failed"
+							? `<span class="usms-error-text">${esc(r.error_message || __("Send failed"))}</span>`
+							: r.sent_on
+								? esc(frappe.datetime.prettyDate(r.sent_on))
+								: ""
+					}</td>
+				</tr>`
+			)
+			.join("");
+		return `<div class="usms-table-wrap"><table class="usms-table">
+			<thead><tr><th>${__("Mobile")}</th><th>${__("Name")}</th><th>${__("Status")}</th><th>${__("Details")}</th></tr></thead>
+			<tbody>${rows}</tbody></table></div>`;
+	}
+}
+
+/** Every campaign, searchable, opening into its details. */
+class UsmsHistoryPanel {
+	static FILTERS = [
+		["", __("All")],
+		["Completed", __("Completed")],
+		["Completed with Errors", __("With errors")],
+		["Failed", __("Failed")],
+		["Sending", __("Sending")],
+	];
+
+	constructor($root, console) {
+		this.$root = $root;
+		this.console = console;
+		this.status = "";
+		this.rows = [];
+		this.render();
+		this.$search = this.$root.find(".usms-history-search");
+		this.$search.on("input", frappe.utils.debounce(() => this.load(), 300));
+		this.$root.on("click", "[data-status]", (e) => {
+			this.status = $(e.currentTarget).data("status");
+			this.$root.find("[data-status]").removeClass("active").filter(e.currentTarget).addClass("active");
+			this.load();
+		});
+		this.$root.on("click", ".usms-more", () => this.load(true));
+		this.$root.on("click", "[data-campaign]", (e) => this.console.open_campaign($(e.currentTarget).data("campaign")));
+	}
+
+	render() {
+		this.$root.html(`
+			<div class="usms-card">
+				<div class="usms-card-head">
+					<div><h2>${__("Campaign history")}</h2><p>${__("Every message this site has sent from the console.")}</p></div>
+				</div>
+				<div class="usms-history-tools">
+					<input class="usms-input usms-history-search" type="search" placeholder="${__("Search campaigns")}">
+					<div class="usms-segment">
+						${UsmsHistoryPanel.FILTERS.map(
+							([value, label]) =>
+								`<button type="button" data-status="${value}" class="${value === "" ? "active" : ""}">${label}</button>`
+						).join("")}
+					</div>
+				</div>
+				<div class="usms-history-list"></div>
+			</div>
+		`);
+	}
+
+	on_show() {
+		this.load();
+		this.console.phone.show("", "");
+	}
+
+	async load(more = false) {
+		const start = more ? this.rows.length : 0;
+		try {
+			const r = await UsmsApi.call("get_campaigns", { search: this.$search.val(), status: this.status, start });
+			this.rows = more ? this.rows.concat(r.campaigns) : r.campaigns;
+			this.render_list(r.has_more);
+		} catch (error) {
+			this.$root.find(".usms-history-list").html(`<div class="usms-notice show error">${esc(error)}</div>`);
+		}
+	}
+
+	render_list(has_more) {
+		const $list = this.$root.find(".usms-history-list");
+		if (!this.rows.length) {
+			$list.html(`<div class="usms-empty">${__("No campaigns match.")}</div>`);
+			return;
+		}
+		$list.html(`
+			<div class="usms-history-grid">
+				${this.rows
+					.map((c) => {
+						const total = cint(c.total_recipients);
+						const pct = total ? Math.round((cint(c.sent_count) / total) * 100) : 0;
+						return `<button type="button" class="usms-history-item" data-campaign="${esc(c.name)}">
+							<div class="usms-history-row">
+								<div class="usms-list-title">${esc(c.campaign_name || c.name)}</div>
+								<span class="usms-status-pill ${USMS_STATUS_COLOURS[c.status] || ""}">${esc(__(c.status))}</span>
+							</div>
+							<div class="usms-mini-progress"><span style="width:${pct}%"></span></div>
+							<div class="usms-history-row usms-list-sub">
+								<span>${__("{0} of {1} sent", [cint(c.sent_count), total])}${
+									cint(c.failed_count) ? ` · <b class="usms-error-text">${__("{0} failed", [cint(c.failed_count)])}</b>` : ""
+								}</span>
+								<span>${esc(frappe.datetime.prettyDate(c.creation))}</span>
+							</div>
+						</button>`;
+					})
+					.join("")}
+			</div>
+			${has_more ? `<div class="usms-actions"><button class="usms-btn usms-more" type="button">${__("Show more")}</button></div>` : ""}
+		`);
+	}
+}
+
 /** The page: header, tabs, and the shared side column. */
 class UpeoSmsConsole {
 	constructor(wrapper) {
@@ -694,6 +1073,8 @@ class UpeoSmsConsole {
 		this.sender = {};
 		this.signature = "";
 		this.quick_send_limit = 10;
+		this.signature_limit = 60;
+		this.can_edit_settings = false;
 		this.load();
 	}
 
@@ -704,8 +1085,11 @@ class UpeoSmsConsole {
 			this.sender = ctx.sender || {};
 			this.signature = ctx.signature || "";
 			this.quick_send_limit = ctx.quick_send_limit || 10;
+			this.signature_limit = ctx.signature_limit || 60;
+			this.can_edit_settings = !!ctx.can_edit_settings;
 			this.render();
 			this.recent.render(ctx.recent_campaigns);
+			this.apply_route();
 		} catch (error) {
 			this.$body.html(`<div class="usms"><div class="usms-card"><div class="usms-empty">${esc(error)}</div></div></div>`);
 		}
@@ -727,17 +1111,22 @@ class UpeoSmsConsole {
 					<div class="usms-sender" title="${esc(source_text)}">
 						<span class="usms-dot ${esc(this.sender.source)}"></span>
 						<span>${__("Sending as")} <b>${esc(this.sender.sender_id || "—")}</b></span>
-						<a class="usms-link-btn" href="/app/upeosms-settings">${__("Settings")}</a>
+						<button type="button" class="usms-link-btn usms-go-settings">${__("Settings")}</button>
 					</div>
 				</header>
 				<nav class="usms-tabs">
 					<button class="usms-tab active" data-tab="bulk">${__("Bulk campaign")}</button>
 					<button class="usms-tab" data-tab="quick">${__("Quick send")}</button>
+					<button class="usms-tab" data-tab="history">${__("History")}</button>
+					<button class="usms-tab" data-tab="settings">${__("Settings")}</button>
 				</nav>
 				<div class="usms-layout">
 					<div class="usms-main">
 						<section class="usms-panel active" data-panel="bulk"></section>
 						<section class="usms-panel" data-panel="quick"></section>
+						<section class="usms-panel" data-panel="history"></section>
+						<section class="usms-panel" data-panel="settings"></section>
+						<section class="usms-panel" data-panel="campaign"></section>
 					</div>
 					<aside class="usms-side">
 						<div class="usms-phone-slot"></div>
@@ -751,27 +1140,64 @@ class UpeoSmsConsole {
 		this.phone = new UsmsPhonePreview($root.find(".usms-phone-slot"), this.sender);
 		this.status = new UsmsCampaignStatus($root.find(".usms-status-slot"));
 		this.status.on_finished = () => this.load_recent();
-		this.recent = new UsmsRecentCampaigns($root.find(".usms-recent-slot"));
+		this.recent = new UsmsRecentCampaigns($root.find(".usms-recent-slot"), (name) => this.open_campaign(name));
+		$root.find(".usms-recent-slot").on("click", ".usms-see-all", () => this.switch_tab("history"));
 		this.panels = {
 			bulk: new UsmsBulkPanel($root.find("[data-panel=bulk]"), this),
 			quick: new UsmsQuickPanel($root.find("[data-panel=quick]"), this),
+			history: new UsmsHistoryPanel($root.find("[data-panel=history]"), this),
+			settings: new UsmsSettingsPanel($root.find("[data-panel=settings]"), this),
+			campaign: new UsmsCampaignPanel($root.find("[data-panel=campaign]"), this),
 		};
 		$root.find(".usms-tab").on("click", (e) => this.switch_tab($(e.currentTarget).data("tab")));
+		$root.on("click", ".usms-go-settings", (e) => {
+			e.preventDefault();
+			this.switch_tab("settings");
+		});
 		this.panels.bulk.on_show();
 	}
 
-	switch_tab(tab) {
+	switch_tab(tab, update_path = true) {
 		const $root = this.$body.find(".usms");
+		if (tab !== "campaign") this.last_tab = tab;
+		if (update_path && tab !== "campaign") this.set_path(tab);
 		$root.find(".usms-tab").removeClass("active").filter(`[data-tab=${tab}]`).addClass("active");
 		$root.find(".usms-panel").removeClass("active").filter(`[data-panel=${tab}]`).addClass("active");
 		$root.find(".usms-status-slot").toggle(tab === "bulk");
 		this.panels[tab].on_show();
+		// Only scroll when the person is further down, so the header stays put otherwise.
+		if ($root.find(".usms-main")[0].getBoundingClientRect().top < 0) window.scrollTo({ top: 0, behavior: "smooth" });
+	}
+
+	/**
+	 * The view lives in the path: /bulk-sms-console/<tab> or
+	 * /bulk-sms-console/campaign/<name>, so desk redirects and bookmarks land
+	 * on the right screen.
+	 */
+	apply_route() {
+		if (!this.panels) return;
+		const [, view, name] = frappe.get_route();
+		if (view === "campaign" && name) this.open_campaign(name, false);
+		else if (this.panels[view] && view !== "campaign") this.switch_tab(view, false);
+	}
+
+	// Keep the address bar in step without adding history entries.
+	set_path(...parts) {
+		const base = window.location.pathname.split("/").slice(0, 3).join("/");
+		const path = [base, ...parts.map(encodeURIComponent)].join("/");
+		if (path !== window.location.pathname) window.history.replaceState(window.history.state, "", path);
+	}
+
+	open_campaign(name, update_path = true) {
+		this.switch_tab("campaign", false);
+		this.panels.campaign.open(name);
+		if (update_path) this.set_path("campaign", name);
 	}
 
 	signature_note() {
 		return this.signature
 			? __("Signed {0} automatically", [`<b>${esc(this.signature)}</b>`])
-			: `${__("No signature")} · <a href="/app/upeosms-settings">${__("add one")}</a>`;
+			: `${__("No signature")} · <a href="#" class="usms-go-settings">${__("add one")}</a>`;
 	}
 
 	async load_recent() {

@@ -3,6 +3,10 @@ import json
 import frappe
 from frappe import _
 
+from upeosms.services.campaign_history import CampaignHistory
+from upeosms.services.campaign_report import CampaignReport
+from upeosms.services.campaign_retry import CampaignRetry
+from upeosms.services.console_settings import ConsoleSettings
 from upeosms.services.message_composer import MessageComposer
 from upeosms.services.quick_send import QuickSend
 from upeosms.services.sample_file import SampleRecipientFile
@@ -21,6 +25,8 @@ def get_console_context():
         "sender": SenderProfile.for_current_site().as_dict(),
         "signature": MessageComposer.from_settings().signature,
         "quick_send_limit": QuickSend.LIMIT,
+        "signature_limit": ConsoleSettings.MAX_SIGNATURE,
+        "can_edit_settings": bool(frappe.has_permission("UPEOSMS Settings", "write")),
         "recent_campaigns": frappe.get_all(
             "SMS Campaign",
             fields=["name", "campaign_name", "status", "total_recipients", "sent_count", "failed_count", "creation"],
@@ -34,6 +40,40 @@ def get_console_context():
 def quick_send(numbers: str, message: str):
     _require_sms_access()
     return QuickSend(numbers, message, MessageComposer.from_settings()).send()
+
+
+@frappe.whitelist()
+def save_signature(signature: str | None = None):
+    _require_sms_access()
+    return {"signature": ConsoleSettings().save_signature(signature)}
+
+
+@frappe.whitelist()
+def get_campaign_detail(campaign_name: str, status: str | None = None, start: int = 0):
+    _require_sms_access()
+    return CampaignReport(campaign_name).as_dict(status=status, start=start)
+
+
+@frappe.whitelist()
+def get_campaigns(search: str | None = None, status: str | None = None, start: int = 0):
+    _require_sms_access()
+    return CampaignHistory(search, status).page(start)
+
+
+@frappe.whitelist()
+def retry_failed_recipients(campaign_name: str):
+    _require_sms_access()
+    count = CampaignRetry(campaign_name).run()
+    return {"message": _("Sending again to {0} people.").format(count)}
+
+
+@frappe.whitelist()
+def download_campaign_results(campaign_name: str):
+    _require_sms_access()
+    report = CampaignReport(campaign_name)
+    frappe.response["filename"] = report.results_filename
+    frappe.response["filecontent"] = report.results_xlsx()
+    frappe.response["type"] = "binary"
 
 
 @frappe.whitelist()
