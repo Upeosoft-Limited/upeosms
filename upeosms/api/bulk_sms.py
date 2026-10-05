@@ -3,9 +3,10 @@ import json
 import frappe
 from frappe import _
 
+from upeosms.services.message_composer import MessageComposer
 from upeosms.tasks import enqueue_campaign_send
 from upeosms.utils.file_parser import read_uploaded_rows
-from upeosms.utils.template import extract_variables, render_message
+from upeosms.utils.template import extract_variables
 
 @frappe.whitelist()
 def create_campaign(campaign_name=None, upload_file=None, message_template=None):
@@ -155,9 +156,10 @@ def _rebuild_recipients(campaign, rows):
     for row_name in old_rows:
         frappe.delete_doc("SMS Recipient", row_name, force=1)
 
+    composer = MessageComposer.from_settings()
     for idx, row in enumerate(rows, start=1):
         recipient_name = row.get("name") or row.get("full_name") or row.get("customer_name") or ""
-        rendered = render_message(campaign.message_template or "", row)
+        rendered = composer.compose(campaign.message_template, row)
 
         frappe.get_doc({
             "doctype": "SMS Recipient",
@@ -171,10 +173,11 @@ def _rebuild_recipients(campaign, rows):
         }).insert(ignore_permissions=True)
 
 def _build_preview(rows, template, limit=5):
+    composer = MessageComposer.from_settings()
     out = []
     for row in rows[:limit]:
         out.append({
             "row": row,
-            "message": render_message(template or "", row),
+            "message": composer.compose(template, row),
         })
     return out

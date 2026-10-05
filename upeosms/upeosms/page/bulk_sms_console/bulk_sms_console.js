@@ -1,802 +1,785 @@
 frappe.provide("upeosms.bulk_sms");
 
-frappe.pages['bulk-sms-console'].on_page_load = function(wrapper) {
-	new UpeoBulkSMSPage(wrapper);
+frappe.pages["bulk-sms-console"].on_page_load = function (wrapper) {
+	new UpeoSmsConsole(wrapper);
 };
 
-class UpeoBulkSMSPage {
-	constructor(wrapper) {
-		this.wrapper = wrapper;
-		this.page = frappe.ui.make_app_page({
-			parent: wrapper,
-			single_column: true,
-		});
-
-		this.campaign_name = null;
-		this.detected_columns = [];
-		this.realtime_event = null;
-		this.preview_rows = [];
-		this.init();
-	}
-
-	init() {
-		this.render();
-		this.bind_events();
-		this.load_defaults();
-	}
-
-	render() {
-		$(this.page.body).html(`
-			<div class="upeosms-page">
-				<div class="upeosms-topbar">
-					<div class="upeosms-topbar-left">
-						<div class="upeosms-title">Bulk SMS Console</div>
-						<div class="upeosms-subtitle">
-							Upload recipients, compose a variable-based message, preview, queue, and monitor delivery in real time.
-						</div>
-					</div>
-					<div class="upeosms-topbar-right">
-						<button class="btn btn-default" id="upeosms-new-campaign-btn">New Campaign</button>
-						<button class="btn btn-primary" id="upeosms-start-btn" disabled>Start Sending</button>
-					</div>
-				</div>
-
-				<div class="upeosms-grid">
-					<div class="upeosms-card upeosms-main-card">
-						<div class="upeosms-card-title">Campaign Setup</div>
-
-						<div class="upeosms-field-grid">
-							<div class="upeosms-field">
-								<label>Campaign Name</label>
-								<input type="text" class="form-control" id="upeosms-campaign-name" placeholder="e.g. Customer Balance Reminder - April 2026">
-							</div>
-
-							<div class="upeosms-field">
-								<label>Upload CSV / XLSX</label>
-								<div class="upeosms-upload-row">
-									<input type="file" id="upeosms-file" accept=".csv,.xlsx">
-									<button class="btn btn-default" id="upeosms-upload-btn">Upload & Parse</button>
-								</div>
-								<div class="upeosms-help">
-									Required column: <code>mobile</code>. Other columns become variables such as <code>{name}</code>, <code>{balance}</code>.
-								</div>
-							</div>
-						</div>
-
-						<div class="upeosms-card-subsection">
-							<div class="upeosms-inline-title">Detected Variables</div>
-							<div id="upeosms-variable-box" class="upeosms-chip-box">
-								<div class="upeosms-empty-text">No variables yet. Upload a file first.</div>
-							</div>
-						</div>
-
-						<div class="upeosms-card-subsection">
-							<div class="upeosms-inline-title">Message Template</div>
-							<textarea
-								id="upeosms-message-template"
-								class="form-control upeosms-textarea"
-								placeholder="Type your SMS here. Example: Hi {name}, your current balance is KES {balance}."
-							></textarea>
-							<div class="upeosms-help">
-								Click any variable above to insert it at the cursor position.
-							</div>
-						</div>
-
-						<div class="upeosms-actions">
-							<button class="btn btn-default" id="upeosms-preview-btn" disabled>Generate Preview</button>
-							<button class="btn btn-default" id="upeosms-refresh-progress-btn" disabled>Refresh Progress</button>
-						</div>
-					</div>
-
-					<div class="upeosms-card upeosms-status-card">
-						<div class="upeosms-card-title">Live Status</div>
-
-						<div class="upeosms-stats">
-							<div class="upeosms-stat-box">
-								<div class="upeosms-stat-label">Status</div>
-								<div class="upeosms-stat-value" id="upeosms-status">Draft</div>
-							</div>
-							<div class="upeosms-stat-box">
-								<div class="upeosms-stat-label">Total</div>
-								<div class="upeosms-stat-value" id="upeosms-total">0</div>
-							</div>
-							<div class="upeosms-stat-box">
-								<div class="upeosms-stat-label">Queued</div>
-								<div class="upeosms-stat-value" id="upeosms-queued">0</div>
-							</div>
-							<div class="upeosms-stat-box">
-								<div class="upeosms-stat-label">Sent</div>
-								<div class="upeosms-stat-value upeosms-success" id="upeosms-sent">0</div>
-							</div>
-							<div class="upeosms-stat-box">
-								<div class="upeosms-stat-label">Failed</div>
-								<div class="upeosms-stat-value upeosms-failed" id="upeosms-failed">0</div>
-							</div>
-						</div>
-
-						<div class="upeosms-progress-wrap">
-							<div class="upeosms-progress-header">
-								<span>Progress</span>
-								<span id="upeosms-progress-label">0%</span>
-							</div>
-							<div class="upeosms-progress-bar">
-								<div class="upeosms-progress-fill" id="upeosms-progress-fill"></div>
-							</div>
-						</div>
-
-						<div class="upeosms-stream" id="upeosms-stream">
-							<div class="upeosms-empty-text">No activity yet.</div>
-						</div>
-					</div>
-				</div>
-
-				<div class="upeosms-card">
-					<div class="upeosms-card-title">Preview</div>
-					<div class="upeosms-preview-toolbar">
-						<div class="upeosms-help">
-							Preview the first few rendered messages before queueing.
-						</div>
-					</div>
-					<div id="upeosms-preview-table-wrap">
-						<div class="upeosms-empty-text">No preview yet.</div>
-					</div>
-				</div>
-			</div>
-		`);
-
-		this.inject_styles();
-		this.cache_dom();
-	}
-
-	cache_dom() {
-		this.$campaign_name = $("#upeosms-campaign-name");
-		this.$file = $("#upeosms-file");
-		this.$upload_btn = $("#upeosms-upload-btn");
-		this.$message_template = $("#upeosms-message-template");
-		this.$variable_box = $("#upeosms-variable-box");
-		this.$preview_btn = $("#upeosms-preview-btn");
-		this.$start_btn = $("#upeosms-start-btn");
-		this.$new_campaign_btn = $("#upeosms-new-campaign-btn");
-		this.$refresh_progress_btn = $("#upeosms-refresh-progress-btn");
-		this.$preview_table_wrap = $("#upeosms-preview-table-wrap");
-
-		this.$status = $("#upeosms-status");
-		this.$total = $("#upeosms-total");
-		this.$queued = $("#upeosms-queued");
-		this.$sent = $("#upeosms-sent");
-		this.$failed = $("#upeosms-failed");
-		this.$progress_fill = $("#upeosms-progress-fill");
-		this.$progress_label = $("#upeosms-progress-label");
-		this.$stream = $("#upeosms-stream");
-	}
-
-	inject_styles() {
-		if ($("#upeosms-page-styles").length) return;
-
-		$("head").append(`
-			<style id="upeosms-page-styles">
-				.upeosms-page {
-					padding: 18px;
-					background: #f7f8fa;
-					min-height: calc(100vh - 90px);
-				}
-
-				.upeosms-topbar {
-					display: flex;
-					align-items: flex-start;
-					justify-content: space-between;
-					gap: 16px;
-					margin-bottom: 18px;
-				}
-
-				.upeosms-title {
-					font-size: 24px;
-					font-weight: 700;
-					color: #1f272e;
-					margin-bottom: 4px;
-				}
-
-				.upeosms-subtitle {
-					font-size: 14px;
-					color: #68727d;
-					max-width: 760px;
-					line-height: 1.5;
-				}
-
-				.upeosms-topbar-right {
-					display: flex;
-					gap: 10px;
-					flex-wrap: wrap;
-				}
-
-				.upeosms-grid {
-					display: grid;
-					grid-template-columns: 1.5fr 1fr;
-					gap: 18px;
-					margin-bottom: 18px;
-				}
-
-				.upeosms-card {
-					background: #fff;
-					border-radius: 16px;
-					padding: 18px;
-					box-shadow: 0 2px 14px rgba(0, 0, 0, 0.04);
-					border: 1px solid #eef1f4;
-				}
-
-				.upeosms-card-title {
-					font-size: 18px;
-					font-weight: 700;
-					color: #1f272e;
-					margin-bottom: 14px;
-				}
-
-				.upeosms-inline-title {
-					font-size: 14px;
-					font-weight: 600;
-					margin-bottom: 8px;
-					color: #36414c;
-				}
-
-				.upeosms-field-grid {
-					display: grid;
-					grid-template-columns: 1fr;
-					gap: 14px;
-				}
-
-				.upeosms-field label {
-					display: block;
-					font-size: 13px;
-					font-weight: 600;
-					color: #36414c;
-					margin-bottom: 6px;
-				}
-
-				.upeosms-upload-row {
-					display: flex;
-					gap: 10px;
-					flex-wrap: wrap;
-					align-items: center;
-				}
-
-				.upeosms-help {
-					font-size: 12px;
-					color: #7c8792;
-					margin-top: 6px;
-					line-height: 1.45;
-				}
-
-				.upeosms-card-subsection {
-					margin-top: 18px;
-				}
-
-				.upeosms-chip-box {
-					display: flex;
-					flex-wrap: wrap;
-					gap: 8px;
-					min-height: 42px;
-				}
-
-				.upeosms-chip {
-					border: 1px solid #dbe2ea;
-					background: #f8fafc;
-					color: #2f3a44;
-					padding: 8px 12px;
-					border-radius: 999px;
-					font-size: 12px;
-					font-weight: 600;
-					cursor: pointer;
-					transition: all 0.15s ease;
-				}
-
-				.upeosms-chip:hover {
-					background: #eef4ff;
-					border-color: #b7cdfb;
-				}
-
-				.upeosms-textarea {
-					min-height: 170px;
-					resize: vertical;
-					font-size: 14px;
-					line-height: 1.6;
-				}
-
-				.upeosms-actions {
-					display: flex;
-					gap: 10px;
-					margin-top: 18px;
-					flex-wrap: wrap;
-				}
-
-				.upeosms-stats {
-					display: grid;
-					grid-template-columns: repeat(2, 1fr);
-					gap: 10px;
-				}
-
-				.upeosms-stat-box {
-					border: 1px solid #edf1f5;
-					border-radius: 14px;
-					padding: 12px;
-					background: #fbfcfd;
-				}
-
-				.upeosms-stat-label {
-					font-size: 12px;
-					color: #7b8794;
-					margin-bottom: 6px;
-				}
-
-				.upeosms-stat-value {
-					font-size: 20px;
-					font-weight: 700;
-					color: #27313a;
-				}
-
-				.upeosms-success {
-					color: #138a36;
-				}
-
-				.upeosms-failed {
-					color: #c92a2a;
-				}
-
-				.upeosms-progress-wrap {
-					margin-top: 16px;
-				}
-
-				.upeosms-progress-header {
-					display: flex;
-					justify-content: space-between;
-					font-size: 13px;
-					font-weight: 600;
-					color: #4b5560;
-					margin-bottom: 8px;
-				}
-
-				.upeosms-progress-bar {
-					width: 100%;
-					height: 12px;
-					background: #edf1f5;
-					border-radius: 999px;
-					overflow: hidden;
-				}
-
-				.upeosms-progress-fill {
-					height: 100%;
-					width: 0%;
-					background: linear-gradient(90deg, #4e8df5, #7aa8ff);
-					transition: width 0.3s ease;
-				}
-
-				.upeosms-stream {
-					margin-top: 16px;
-					background: #fbfcfd;
-					border: 1px solid #edf1f5;
-					border-radius: 14px;
-					padding: 12px;
-					max-height: 250px;
-					overflow: auto;
-				}
-
-				.upeosms-stream-item {
-					padding: 8px 0;
-					border-bottom: 1px solid #edf1f5;
-					font-size: 13px;
-					color: #46505a;
-				}
-
-				.upeosms-stream-item:last-child {
-					border-bottom: none;
-				}
-
-				.upeosms-preview-toolbar {
-					margin-bottom: 10px;
-				}
-
-				.upeosms-preview-table {
-					width: 100%;
-					border-collapse: collapse;
-				}
-
-				.upeosms-preview-table th,
-				.upeosms-preview-table td {
-					border-bottom: 1px solid #edf1f5;
-					padding: 10px 8px;
-					text-align: left;
-					vertical-align: top;
-					font-size: 13px;
-				}
-
-				.upeosms-preview-table th {
-					color: #5e6975;
-					font-weight: 700;
-					background: #fafbfd;
-				}
-
-				.upeosms-empty-text {
-					font-size: 13px;
-					color: #8a95a0;
-					padding: 8px 0;
-				}
-
-				@media (max-width: 992px) {
-					.upeosms-grid {
-						grid-template-columns: 1fr;
-					}
-				}
-			</style>
-		`);
-	}
-
-	bind_events() {
-		this.$new_campaign_btn.on("click", () => this.reset_page());
-		this.$upload_btn.on("click", () => this.upload_and_parse());
-		this.$preview_btn.on("click", () => this.generate_preview());
-		this.$start_btn.on("click", () => this.start_sending());
-		this.$refresh_progress_btn.on("click", () => this.refresh_progress());
-	}
-
-	
-
-	load_defaults() {
-		this.reset_stats();
-	}
-
-	reset_page() {
-		this.campaign_name = null;
-		this.detected_columns = [];
-		this.preview_rows = [];
-
-		this.$campaign_name.val("");
-		this.$file.val("");
-		this.$message_template.val("");
-		this.render_variable_chips();
-		this.render_preview([]);
-		this.reset_stats();
-		this.append_stream("New campaign started.");
-		this.toggle_actions(false);
-		this.unsubscribe_realtime();
-	}
-
-	toggle_actions(enabled) {
-		this.$preview_btn.prop("disabled", !enabled);
-		this.$start_btn.prop("disabled", !enabled);
-		this.$refresh_progress_btn.prop("disabled", !enabled);
-		this.page.btn_primary.prop("disabled", !enabled);
-	}
-
-	reset_stats() {
-		this.update_stats({
-			status: "Draft",
-			total: 0,
-			queued: 0,
-			sent: 0,
-			failed: 0,
-			progress_percent: 0,
-		});
-	}
-
-	append_stream(message) {
-		const timestamp = frappe.datetime.now_time();
-		const empty = this.$stream.find(".upeosms-empty-text");
-		if (empty.length) empty.remove();
-
-		this.$stream.prepend(`
-			<div class="upeosms-stream-item">
-				<span style="color:#7b8794;">[${timestamp}]</span> ${frappe.utils.escape_html(message)}
-			</div>
-		`);
-	}
-
-	render_variable_chips() {
-		if (!this.detected_columns.length) {
-			this.$variable_box.html(`<div class="upeosms-empty-text">No variables yet. Upload a file first.</div>`);
-			return;
-		}
-
-		this.$variable_box.empty();
-
-		this.detected_columns.forEach((col) => {
-			const $chip = $(`<button class="upeosms-chip" type="button">{${frappe.utils.escape_html(col)}}</button>`);
-			$chip.on("click", () => this.insert_variable(`{${col}}`));
-			this.$variable_box.append($chip);
-		});
-	}
-
-	insert_variable(text) {
-		const input = this.$message_template.get(0);
-		if (!input) return;
-
-		const start = input.selectionStart || 0;
-		const end = input.selectionEnd || 0;
-		const value = input.value || "";
-
-		const updated = value.substring(0, start) + text + value.substring(end);
-		this.$message_template.val(updated);
-
-		setTimeout(() => {
-			input.focus();
-			input.selectionStart = input.selectionEnd = start + text.length;
-		}, 0);
-	}
-
-	async upload_and_parse() {
-		const campaign_name = (this.$campaign_name.val() || "").trim();
-		const file = this.$file.get(0)?.files?.[0];
-		const message_template = (this.$message_template.val() || "").trim();
-
-		if (!campaign_name) {
-			frappe.msgprint("Enter a campaign name first.");
-			return;
-		}
-
-		if (!file) {
-			frappe.msgprint("Please choose a CSV or XLSX file.");
-			return;
-		}
-
-		try {
-			frappe.dom.freeze("Uploading and parsing file...");
-
-			const file_doc = await this.upload_file(file);
-
-			const r = await frappe.call({
-				method: "upeosms.api.page.create_or_update_campaign_from_page",
-				args: {
-					campaign_name,
-					file_url: file_doc.file_url,
-					message_template,
-				},
-			});
-
-			const data = r.message || {};
-			this.campaign_name = data.campaign;
-			this.detected_columns = data.columns || [];
-			this.preview_rows = data.preview || [];
-
-			this.render_variable_chips();
-			this.render_preview(this.preview_rows);
-			this.update_stats({
-				status: data.status || "Ready",
-				total: data.total || 0,
-				queued: 0,
-				sent: 0,
-				failed: 0,
-				progress_percent: 0,
-			});
-
-			this.subscribe_realtime();
-			this.toggle_actions(true);
-			this.append_stream(`File parsed successfully. ${data.total || 0} recipients loaded.`);
-			frappe.show_alert({ message: "File parsed successfully.", indicator: "green" });
-		} catch (e) {
-			this.handle_error(e);
-		} finally {
-			frappe.dom.unfreeze();
-		}
-	}
-
-
-	upload_file(file) {
+const USMS_ICONS = {
+	logo: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8M8 13h5"/></svg>`,
+	upload: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5M12 3v12"/></svg>`,
+	file: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 15l2 2 4-4"/></svg>`,
+	download: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>`,
+	send: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg>`,
+};
+
+const USMS_STATUS_COLOURS = {
+	Draft: "",
+	Ready: "blue",
+	Queued: "blue live",
+	Sending: "blue live",
+	Completed: "green",
+	"Completed with Errors": "orange",
+	Failed: "red",
+	Sent: "green",
+	Pending: "blue",
+	Processing: "blue live",
+};
+
+const esc = (value) => frappe.utils.escape_html(value == null ? "" : String(value));
+
+/** Server calls. Errors come back as plain text so panels can show them inline. */
+class UsmsApi {
+	static call(method, args = {}) {
 		return new Promise((resolve, reject) => {
-			const form_data = new FormData();
-			form_data.append("file", file, file.name);
-			form_data.append("is_private", 1);
+			frappe.call({
+				method: `upeosms.api.page.${method}`,
+				args,
+				silent: true,
+				callback: (r) => resolve(r.message),
+				error: (r) => reject(UsmsApi.error_text(r)),
+			});
+		});
+	}
 
+	static error_text(r) {
+		try {
+			const messages = JSON.parse(r?._server_messages || "[]").map((m) => {
+				const parsed = JSON.parse(m);
+				return parsed.message || parsed;
+			});
+			if (messages.length) return $("<div>").html(messages.join(" ")).text();
+		} catch (e) {
+			console.error(e);
+		}
+		return __("Something went wrong. Please try again.");
+	}
+
+	static upload(file) {
+		return new Promise((resolve, reject) => {
+			const form = new FormData();
+			form.append("file", file, file.name);
+			form.append("is_private", 1);
 			$.ajax({
 				url: "/api/method/upload_file",
 				type: "POST",
-				data: form_data,
+				data: form,
 				processData: false,
 				contentType: false,
-				headers: {
-					"X-Frappe-CSRF-Token": frappe.csrf_token,
-				},
-				success: function (r) {
-					if (r && r.message) {
-						resolve(r.message);
-					} else {
-						reject("File upload failed.");
-					}
-				},
-				error: function (xhr) {
-					let msg = "File upload failed.";
-					if (xhr?.responseJSON?.message) {
-						msg = xhr.responseJSON.message;
-					}
-					reject(msg);
-				},
+				headers: { "X-Frappe-CSRF-Token": frappe.csrf_token },
+				success: (r) => (r?.message ? resolve(r.message) : reject(__("Upload failed."))),
+				error: (xhr) => reject(UsmsApi.error_text(xhr.responseJSON) || __("Upload failed.")),
 			});
 		});
 	}
+}
 
-	
+/** Mirrors upeosms.services.message_composer so previews match what is sent. */
+class UsmsText {
+	static GSM =
+		/^[@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !"#¤%&'()*+,\-./0-9:;<=>?¡A-ZÄÖÑÜ§¿a-zäöñüà^{}\\[~\]|€]*$/;
+	static GSM_EXTENDED = /[\^{}\\[~\]|€]/g;
 
-	async generate_preview() {
-		const message_template = (this.$message_template.val() || "").trim();
-
-		if (!this.campaign_name) {
-			frappe.msgprint("Upload and parse a file first.");
-			return;
-		}
-
-		if (!message_template) {
-			frappe.msgprint("Enter the message template first.");
-			return;
-		}
-
-		try {
-			frappe.dom.freeze("Generating preview...");
-
-			const r = await frappe.call({
-				method: "upeosms.api.page.generate_preview_from_page",
-				args: {
-					campaign_name: this.campaign_name,
-					message_template,
-				},
-			});
-
-			this.preview_rows = r.message?.preview || [];
-			this.render_preview(this.preview_rows);
-			this.append_stream("Preview generated.");
-			frappe.show_alert({ message: "Preview generated.", indicator: "green" });
-		} catch (e) {
-			this.handle_error(e);
-		} finally {
-			frappe.dom.unfreeze();
-		}
+	static variables(template) {
+		return [...new Set([...(template || "").matchAll(/\{([a-zA-Z0-9_]+)\}/g)].map((m) => m[1]))];
 	}
 
-	render_preview(rows) {
-		if (!rows || !rows.length) {
-			this.$preview_table_wrap.html(`<div class="upeosms-empty-text">No preview yet.</div>`);
-			return;
-		}
+	static render(template, row) {
+		let message = template || "";
+		Object.entries(row || {}).forEach(([key, value]) => {
+			message = message.split(`{${key}}`).join(value == null ? "" : String(value));
+		});
+		return message;
+	}
 
-		const html = `
-			<div style="overflow:auto;">
-				<table class="upeosms-preview-table">
-					<thead>
-						<tr>
-							<th style="width:60px;">#</th>
-							<th style="width:180px;">Mobile</th>
-							<th style="width:180px;">Name</th>
-							<th>Rendered Message</th>
-						</tr>
-					</thead>
-					<tbody>
-						${rows
-							.map((row, index) => {
-								const data = row.data || {};
-								return `
-									<tr>
-										<td>${index + 1}</td>
-										<td>${frappe.utils.escape_html(cstr(data.mobile || ""))}</td>
-										<td>${frappe.utils.escape_html(cstr(data.name || data.full_name || ""))}</td>
-										<td>${frappe.utils.escape_html(cstr(row.message || ""))}</td>
-									</tr>
-								`;
-							})
-							.join("")}
-					</tbody>
-				</table>
+	static sign(message, signature) {
+		message = (message || "").trimEnd();
+		if (!signature || !message || message.endsWith(signature)) return message;
+		return `${message}\n${signature}`;
+	}
+
+	static segments(text) {
+		if (!text) return { length: 0, parts: 0 };
+		if (UsmsText.GSM.test(text)) {
+			const length = text.length + (text.match(UsmsText.GSM_EXTENDED) || []).length;
+			return { length, parts: length <= 160 ? 1 : Math.ceil(length / 153) };
+		}
+		const length = [...text].length;
+		return { length, parts: length <= 70 ? 1 : Math.ceil(length / 67) };
+	}
+}
+
+/** The phone mock-up that shows exactly what a recipient will read. */
+class UsmsPhonePreview {
+	constructor($root, sender) {
+		this.$root = $root;
+		const name = sender.sender_id || __("Sender");
+		$root.html(`
+			<div class="usms-phone">
+				<div class="usms-phone-screen">
+					<div class="usms-phone-top">
+						<div class="usms-avatar">${esc(name.charAt(0))}</div>
+						<div class="usms-phone-name">${esc(name)}</div>
+					</div>
+					<div class="usms-phone-body">
+						<div class="usms-bubble placeholder"></div>
+						<div class="usms-phone-meta"></div>
+					</div>
+				</div>
 			</div>
-		`;
-
-		this.$preview_table_wrap.html(html);
+		`);
+		this.$bubble = $root.find(".usms-bubble");
+		this.$meta = $root.find(".usms-phone-meta");
+		this.show("", "");
 	}
 
-	async start_sending() {
-		const message_template = (this.$message_template.val() || "").trim();
-
-		if (!this.campaign_name) {
-			frappe.msgprint("Upload and parse a file first.");
+	show(body, signature, note = "") {
+		if (!body) {
+			this.$bubble.addClass("placeholder").text(__("Your message will appear here as people will see it."));
+			this.$meta.text(note);
 			return;
 		}
+		const text = body.trimEnd();
+		const signed = UsmsText.sign(text, signature);
+		const sig = signed === text ? "" : `\n<span class="usms-bubble-sig">${esc(signature)}</span>`;
+		this.$bubble.removeClass("placeholder").html(esc(text) + sig);
+		const seg = UsmsText.segments(signed);
+		this.$meta.text(
+			[note, __("{0} characters", [seg.length]), seg.parts === 1 ? __("1 SMS") : __("{0} SMS each", [seg.parts])]
+				.filter(Boolean)
+				.join(" · ")
+		);
+	}
+}
 
-		if (!message_template) {
-			frappe.msgprint("Enter the message template first.");
-			return;
-		}
+/** Live progress of the campaign being sent: realtime events plus a polling fallback. */
+class UsmsCampaignStatus {
+	constructor($root) {
+		this.$root = $root;
+		this.campaign = null;
+		$root.html(`
+			<div class="usms-card">
+				<div class="usms-card-head">
+					<div><h2>${__("Delivery")}</h2><p class="usms-status-sub">${__("Nothing sending yet")}</p></div>
+					<div class="usms-spacer"></div>
+					<span class="usms-status-pill">${__("Draft")}</span>
+				</div>
+				<div class="usms-progress"><div class="usms-progress-fill"></div></div>
+				<div class="usms-stats">
+					<div class="usms-stat sent"><span>${__("Sent")}</span><strong data-k="sent">0</strong></div>
+					<div class="usms-stat failed"><span>${__("Failed")}</span><strong data-k="failed">0</strong></div>
+					<div class="usms-stat"><span>${__("Waiting")}</span><strong data-k="queued">0</strong></div>
+				</div>
+			</div>
+		`);
+		this.on_event = (data) => data?.campaign === this.campaign && this.render(data);
+		frappe.realtime.on("upeosms_campaign_progress", this.on_event);
+	}
 
+	watch(campaign, data = {}) {
+		this.campaign = campaign;
+		this.render(data);
+		this.poll();
+	}
+
+	reset() {
+		this.campaign = null;
+		clearTimeout(this.timer);
+		this.render({ status: "Draft" });
+		this.$root.find(".usms-status-sub").text(__("Nothing sending yet"));
+	}
+
+	async poll() {
+		clearTimeout(this.timer);
+		if (!this.campaign) return;
 		try {
-			frappe.dom.freeze("Queueing SMS...");
-
-			const r = await frappe.call({
-				method: "upeosms.api.page.start_campaign_from_page",
-				args: {
-					campaign_name: this.campaign_name,
-					message_template,
-				},
-			});
-
-			const msg = r.message?.message || "Campaign queued successfully.";
-			this.append_stream(msg);
-			frappe.show_alert({ message: msg, indicator: "green" });
-
-			await this.refresh_progress();
-			this.subscribe_realtime();
+			const data = await UsmsApi.call("get_campaign_progress_from_page", { campaign_name: this.campaign });
+			this.render(data);
+			if (["Queued", "Sending"].includes(data.status)) {
+				this.timer = setTimeout(() => this.poll(), 3000);
+			} else {
+				this.on_finished && this.on_finished(data);
+			}
 		} catch (e) {
-			this.handle_error(e);
-		} finally {
-			frappe.dom.unfreeze();
+			this.timer = setTimeout(() => this.poll(), 6000);
 		}
 	}
 
-	async refresh_progress() {
-		if (!this.campaign_name) return;
-
-		try {
-			const r = await frappe.call({
-				method: "upeosms.api.page.get_campaign_progress_from_page",
-				args: {
-					campaign_name: this.campaign_name,
-				},
-			});
-
-			this.update_stats(r.message || {});
-		} catch (e) {
-			this.handle_error(e);
-		}
-	}
-
-	update_stats(data) {
+	render(data) {
 		const status = data.status || "Draft";
-		const total = cint(data.total || 0);
-		const queued = cint(data.queued || 0);
-		const sent = cint(data.sent || 0);
-		const failed = cint(data.failed || 0);
-		const progress = flt(data.progress_percent || 0, 2);
+		const total = cint(data.total);
+		const sent = cint(data.sent);
+		const failed = cint(data.failed);
+		this.$root
+			.find(".usms-status-pill")
+			.attr("class", `usms-status-pill ${USMS_STATUS_COLOURS[status] || ""}`)
+			.text(__(status));
+		if (this.campaign) {
+			this.$root
+				.find(".usms-status-sub")
+				.text(total ? __("{0} of {1} done", [sent + failed, total]) : __("Campaign {0}", [this.campaign]));
+		}
+		this.$root.find(".usms-progress-fill").css("width", `${flt(data.progress_percent)}%`);
+		this.$root.find("[data-k=sent]").text(sent);
+		this.$root.find("[data-k=failed]").text(failed);
+		this.$root.find("[data-k=queued]").text(cint(data.queued));
+	}
+}
 
-		this.$status.text(status);
-		this.$total.text(total);
-		this.$queued.text(queued);
-		this.$sent.text(sent);
-		this.$failed.text(failed);
-		this.$progress_fill.css("width", `${progress}%`);
-		this.$progress_label.text(`${progress}%`);
+/** The last few campaigns, linking to their records. */
+class UsmsRecentCampaigns {
+	constructor($root) {
+		this.$root = $root;
 	}
 
-	subscribe_realtime() {
-		if (!this.campaign_name) return;
+	render(campaigns) {
+		const rows = (campaigns || [])
+			.map(
+				(c) => `
+				<a class="usms-list-item" href="/app/sms-campaign/${encodeURIComponent(c.name)}">
+					<div class="usms-list-main">
+						<div class="usms-list-title">${esc(c.campaign_name || c.name)}</div>
+						<div class="usms-list-sub">${__("{0} of {1} sent", [cint(c.sent_count), cint(c.total_recipients)])} · ${esc(
+							frappe.datetime.prettyDate(c.creation)
+						)}</div>
+					</div>
+					<span class="usms-status-pill ${(USMS_STATUS_COLOURS[c.status] || "").replace("live", "")}">${esc(__(c.status))}</span>
+				</a>`
+			)
+			.join("");
+		this.$root.html(`
+			<div class="usms-card">
+				<div class="usms-card-head"><div><h2>${__("Recent campaigns")}</h2></div></div>
+				<div class="usms-list">${rows || `<div class="usms-empty">${__("No campaigns yet.")}</div>`}</div>
+			</div>
+		`);
+	}
+}
 
-		this.unsubscribe_realtime();
+/** Upload a file, write a template, review, send. */
+class UsmsBulkPanel {
+	constructor($root, console) {
+		this.$root = $root;
+		this.console = console;
+		this.campaign = null;
+		this.columns = [];
+		this.rows = [];
+		this.total = 0;
+		this.render();
+		this.bind();
+	}
 
-		this.realtime_event = `upeosms_progress_${this.campaign_name}`;
+	render() {
+		this.$root.html(`
+			<div class="usms-card">
+				<div class="usms-card-head">
+					<div class="usms-step" data-step="1">1</div>
+					<div><h2>${__("Who's receiving?")}</h2><p>${__("Upload an Excel or CSV list of people.")}</p></div>
+				</div>
+				<div class="usms-field">
+					<label class="usms-label">${__("Campaign name")}</label>
+					<input class="usms-input usms-campaign-name" type="text" placeholder="${__("e.g. October pledge reminder")}">
+				</div>
+				<div class="usms-field">
+					<label class="usms-drop">
+						<input type="file" accept=".csv,.xlsx">
+						<div class="usms-drop-icon">${USMS_ICONS.upload}</div>
+						<div>
+							<div class="usms-drop-title">${__("Drop your file here, or click to browse")}</div>
+							<div class="usms-drop-sub">${__("Excel (.xlsx) or CSV")}</div>
+						</div>
+					</label>
+					<div class="usms-hint">
+						<span>${__("Needs a {0} column. Every other column becomes a variable, like {1}.", [
+							"<code>mobile</code>",
+							"<code>{name}</code>",
+						])}</span>
+						<a class="usms-link-btn usms-sample" href="#">${USMS_ICONS.download} ${__("Download sample file")}</a>
+					</div>
+				</div>
+				<div class="usms-notice usms-upload-notice"></div>
+			</div>
 
-		frappe.realtime.on(this.realtime_event, (data) => {
-			this.update_stats(data || {});
-			this.append_stream(
-				`Progress update — Sent: ${cint(data?.sent || 0)}, Failed: ${cint(data?.failed || 0)}, Queued: ${cint(data?.queued || 0)}, Progress: ${flt(data?.progress_percent || 0, 2)}%`
+			<div class="usms-card">
+				<div class="usms-card-head">
+					<div class="usms-step" data-step="2">2</div>
+					<div><h2>${__("Write your message")}</h2><p>${__("Click a variable to drop it in.")}</p></div>
+				</div>
+				<div class="usms-chips"></div>
+				<textarea class="usms-textarea usms-template" placeholder="${__(
+					"Hi {name}, thank you for your pledge of KES {amount}."
+				)}"></textarea>
+				<div class="usms-meta"><span class="usms-sig-note"></span><span class="usms-count"></span></div>
+			</div>
+
+			<div class="usms-card">
+				<div class="usms-card-head">
+					<div class="usms-step" data-step="3">3</div>
+					<div><h2>${__("Review and send")}</h2><p class="usms-review-sub">${__("The first few messages, exactly as they will go out.")}</p></div>
+				</div>
+				<div class="usms-preview"><div class="usms-empty">${__("Upload a file to see a preview.")}</div></div>
+				<div class="usms-notice usms-send-notice"></div>
+				<div class="usms-actions">
+					<button class="usms-btn usms-cancel" style="display:none">${__("Cancel")}</button>
+					<button class="usms-btn primary usms-send" disabled>${USMS_ICONS.send} <span>${__("Send")}</span></button>
+				</div>
+			</div>
+		`);
+		this.$name = this.$root.find(".usms-campaign-name");
+		this.$drop = this.$root.find(".usms-drop");
+		this.$file = this.$drop.find("input");
+		this.$template = this.$root.find(".usms-template");
+		this.$send = this.$root.find(".usms-send");
+		this.$cancel = this.$root.find(".usms-cancel");
+	}
+
+	bind() {
+		this.$file.on("change", () => this.$file[0].files[0] && this.upload(this.$file[0].files[0]));
+		this.$drop
+			.on("dragover", (e) => {
+				e.preventDefault();
+				this.$drop.addClass("over");
+			})
+			.on("dragleave drop", () => this.$drop.removeClass("over"))
+			.on("drop", (e) => {
+				e.preventDefault();
+				const file = e.originalEvent.dataTransfer?.files?.[0];
+				file && this.upload(file);
+			});
+		this.$root.find(".usms-sample").on("click", (e) => {
+			e.preventDefault();
+			window.open("/api/method/upeosms.api.page.download_sample_file");
+		});
+		this.$template.on("input", () => this.refresh());
+		this.$send.on("click", () => this.on_send());
+		this.$cancel.on("click", () => this.disarm());
+	}
+
+	on_show() {
+		this.refresh();
+	}
+
+	notice(selector, text, kind = "error") {
+		const $n = this.$root.find(selector);
+		$n.attr("class", `usms-notice ${selector.slice(1)} ${text ? `show ${kind}` : ""}`).text(text || "");
+	}
+
+	async upload(file) {
+		this.notice(".usms-upload-notice", "");
+		if (!this.$name.val().trim()) {
+			this.$name.val(`${file.name.replace(/\.[^.]+$/, "")} · ${frappe.datetime.str_to_user(frappe.datetime.get_today())}`);
+		}
+		this.$drop.removeClass("loaded").find(".usms-drop-title").text(__("Reading {0}…", [file.name]));
+		try {
+			const doc = await UsmsApi.upload(file);
+			const data = await UsmsApi.call("create_or_update_campaign_from_page", {
+				campaign_name: this.$name.val().trim(),
+				file_url: doc.file_url,
+				message_template: this.$template.val(),
+			});
+			this.campaign = data.campaign;
+			this.columns = data.columns || [];
+			this.rows = (data.preview || []).map((p) => p.data);
+			this.total = cint(data.total);
+			this.$drop.addClass("loaded").find(".usms-drop-icon").html(USMS_ICONS.file);
+			this.$drop.find(".usms-drop-title").text(file.name);
+			this.$drop.find(".usms-drop-sub").text(__("{0} people loaded · click to replace", [this.total]));
+			this.$root.find("[data-step=1]").addClass("done").text("✓");
+			this.console.status.watch(this.campaign, { status: data.status, total: this.total, queued: 0 });
+			this.render_chips();
+			this.refresh();
+		} catch (error) {
+			this.$drop.find(".usms-drop-title").text(__("Drop your file here, or click to browse"));
+			this.notice(".usms-upload-notice", error);
+		} finally {
+			this.$file.val("");
+		}
+	}
+
+	render_chips() {
+		const $chips = this.$root.find(".usms-chips").empty();
+		this.columns.forEach((col) => {
+			$(`<button type="button" class="usms-chip">{${esc(col)}}</button>`)
+				.on("click", () => this.insert(`{${col}}`))
+				.appendTo($chips);
+		});
+	}
+
+	insert(text) {
+		const el = this.$template[0];
+		const start = el.selectionStart ?? el.value.length;
+		el.value = el.value.slice(0, start) + text + el.value.slice(el.selectionEnd ?? start);
+		el.focus();
+		el.selectionStart = el.selectionEnd = start + text.length;
+		this.refresh();
+	}
+
+	missing_variables() {
+		return UsmsText.variables(this.$template.val()).filter((v) => !this.columns.includes(v));
+	}
+
+	refresh() {
+		const template = this.$template.val();
+		const signature = this.console.signature;
+		const first = UsmsText.render(template, this.rows[0] || {});
+		const seg = UsmsText.segments(UsmsText.sign(first, signature));
+		this.$root.find(".usms-count").html(
+			template ? `<b>${seg.length}</b> ${__("characters")} · <b>${seg.parts}</b> ${seg.parts === 1 ? __("SMS") : __("SMS each")}` : ""
+		);
+		this.$root.find(".usms-sig-note").html(this.console.signature_note());
+		this.$root.find("[data-step=2]").toggleClass("done", !!template.trim()).text(template.trim() ? "✓" : "2");
+		this.console.phone.show(template ? first : "", signature, this.rows[0]?.name ? __("To {0}", [this.rows[0].name]) : "");
+		this.render_preview(template);
+		this.disarm();
+	}
+
+	render_preview(template) {
+		const missing = this.missing_variables();
+		this.notice(
+			".usms-send-notice",
+			this.campaign && missing.length
+				? __("Your file has no column for {0}. Fix the message or the file.", [missing.map((m) => `{${m}}`).join(", ")])
+				: "",
+			"warn"
+		);
+		this.$send.prop("disabled", !this.campaign || !template.trim() || missing.length > 0);
+		this.$send.find("span").text(this.total ? __("Send to {0} people", [this.total]) : __("Send"));
+		if (!this.rows.length) return;
+		const body = this.rows
+			.map(
+				(row) => `<tr>
+					<td class="num">${esc(row.mobile)}</td>
+					<td class="num">${esc(row.name || row.full_name || "")}</td>
+					<td>${esc(template ? UsmsText.sign(UsmsText.render(template, row), this.console.signature) : "—")}</td>
+				</tr>`
+			)
+			.join("");
+		this.$root.find(".usms-preview").html(`
+			<div class="usms-table-wrap"><table class="usms-table">
+				<thead><tr><th>${__("Mobile")}</th><th>${__("Name")}</th><th>${__("Message")}</th></tr></thead>
+				<tbody>${body}</tbody>
+			</table></div>
+		`);
+		this.$root
+			.find(".usms-review-sub")
+			.text(
+				this.total > this.rows.length
+					? __("The first {0} of {1} messages, exactly as they will go out.", [this.rows.length, this.total])
+					: __("Every message, exactly as it will go out.")
 			);
-		});
 	}
 
-	unsubscribe_realtime() {
-		if (this.realtime_event) {
-			frappe.realtime.off(this.realtime_event);
-			this.realtime_event = null;
+	// Sending is two clicks: the first arms the button, the second sends.
+	on_send() {
+		if (!this.$send.hasClass("danger")) {
+			this.$send.addClass("danger").removeClass("primary");
+			this.$send
+				.find("span")
+				.text(__("Confirm: send {0} SMS as {1}", [this.total, this.console.sender.sender_id || __("this sender")]));
+			this.$cancel.show();
+			return;
+		}
+		this.send();
+	}
+
+	disarm() {
+		this.$send.removeClass("danger").addClass("primary");
+		this.$send.find("span").text(this.total ? __("Send to {0} people", [this.total]) : __("Send"));
+		this.$cancel.hide();
+	}
+
+	async send() {
+		this.$send.addClass("loading");
+		this.$cancel.hide();
+		try {
+			const r = await UsmsApi.call("start_campaign_from_page", {
+				campaign_name: this.campaign,
+				message_template: this.$template.val(),
+			});
+			this.$root.find("[data-step=3]").addClass("done").text("✓");
+			this.notice(".usms-send-notice", r?.message || __("Campaign queued."), "ok");
+			frappe.show_alert({ message: __("Sending started"), indicator: "green" });
+			this.console.status.watch(this.campaign, { status: "Queued", total: this.total, queued: this.total });
+			this.console.load_recent();
+			this.$send.prop("disabled", true).find("span").text(__("Sending started"));
+		} catch (error) {
+			this.notice(".usms-send-notice", error);
+			this.disarm();
+		} finally {
+			this.$send.removeClass("loading");
+		}
+	}
+}
+
+/** Send a message to a few typed-in numbers, no file needed. */
+class UsmsQuickPanel {
+	static KE_MOBILE = /^(?:\+?254|0)?[17]\d{8}$/;
+
+	constructor($root, console) {
+		this.$root = $root;
+		this.console = console;
+		this.numbers = [];
+		this.render();
+		this.bind();
+	}
+
+	render() {
+		const limit = this.console.quick_send_limit;
+		this.$root.html(`
+			<div class="usms-card">
+				<div class="usms-card-head">
+					<div class="usms-step">1</div>
+					<div><h2>${__("Send a test")}</h2><p>${__(
+						"Check how a message lands on one or a few phones, up to {0}, before a full campaign.",
+						[limit]
+					)}</p></div>
+				</div>
+				<div class="usms-field">
+					<label class="usms-label">${__("Phone numbers")}</label>
+					<div class="usms-tokens"><input type="text" inputmode="tel" placeholder="${__(
+						"07XX XXX XXX, then Enter"
+					)}"></div>
+					<div class="usms-meta"><span>${__("Separate numbers with Enter, a comma or a space. You can paste several.")}</span><span class="usms-num-count"></span></div>
+				</div>
+				<div class="usms-field">
+					<label class="usms-label">${__("Message")}</label>
+					<textarea class="usms-textarea usms-quick-message" placeholder="${__("Type the message to send.")}"></textarea>
+					<div class="usms-meta"><span class="usms-sig-note"></span><span class="usms-count"></span></div>
+				</div>
+				<div class="usms-notice usms-quick-notice"></div>
+				<div class="usms-actions">
+					<button class="usms-btn primary usms-quick-send" disabled>${USMS_ICONS.send} <span>${__("Send test")}</span></button>
+				</div>
+			</div>
+			<div class="usms-card usms-results" style="display:none">
+				<div class="usms-card-head"><div><h2>${__("Results")}</h2><p class="usms-results-sub"></p></div></div>
+				<div class="usms-list"></div>
+			</div>
+		`);
+		this.$tokens = this.$root.find(".usms-tokens");
+		this.$input = this.$tokens.find("input");
+		this.$message = this.$root.find(".usms-quick-message");
+		this.$send = this.$root.find(".usms-quick-send");
+	}
+
+	bind() {
+		this.$tokens.on("click", () => this.$input.focus());
+		this.$input.on("keydown", (e) => {
+			if (["Enter", ",", " ", "Tab"].includes(e.key) && this.$input.val().trim()) {
+				e.preventDefault();
+				this.add(this.$input.val());
+			} else if (e.key === "Backspace" && !this.$input.val() && this.numbers.length) {
+				this.remove(this.numbers.length - 1);
+			}
+		});
+		this.$input.on("paste", (e) => {
+			e.preventDefault();
+			this.add(e.originalEvent.clipboardData.getData("text"));
+		});
+		this.$input.on("blur", () => this.$input.val().trim() && this.add(this.$input.val()));
+		this.$message.on("input", () => this.refresh());
+		this.$send.on("click", () => this.send());
+	}
+
+	on_show() {
+		this.refresh();
+	}
+
+	add(text) {
+		text.split(/[\s,;]+/)
+			.map((n) => n.trim())
+			.filter((n) => n && !this.numbers.includes(n))
+			.forEach((n) => this.numbers.push(n));
+		this.$input.val("");
+		this.render_tokens();
+	}
+
+	remove(index) {
+		this.numbers.splice(index, 1);
+		this.render_tokens();
+	}
+
+	render_tokens() {
+		this.$tokens.find(".usms-token").remove();
+		this.numbers.forEach((n, i) => {
+			const valid = UsmsQuickPanel.KE_MOBILE.test(n.replace(/[\s-]/g, ""));
+			$(`<span class="usms-token ${valid ? "" : "invalid"}" title="${valid ? "" : __("Not a valid Kenyan mobile number")}">
+				${esc(n)}<button type="button" aria-label="${__("Remove")}">×</button></span>`)
+				.on("click", "button", (e) => {
+					e.stopPropagation();
+					this.remove(i);
+				})
+				.insertBefore(this.$input);
+		});
+		this.refresh();
+	}
+
+	refresh() {
+		const message = this.$message.val();
+		const limit = this.console.quick_send_limit;
+		const invalid = this.numbers.filter((n) => !UsmsQuickPanel.KE_MOBILE.test(n.replace(/[\s-]/g, "")));
+		const variables = UsmsText.variables(message);
+		const seg = UsmsText.segments(UsmsText.sign(message, this.console.signature));
+		this.$root.find(".usms-num-count").text(this.numbers.length ? `${this.numbers.length} / ${limit}` : "");
+		this.$root.find(".usms-sig-note").html(this.console.signature_note());
+		this.$root
+			.find(".usms-count")
+			.html(message ? `<b>${seg.length}</b> ${__("characters")} · <b>${seg.parts}</b> ${seg.parts === 1 ? __("SMS") : __("SMS each")}` : "");
+		let problem = "";
+		if (this.numbers.length > limit) problem = __("A test can go to at most {0} numbers.", [limit]);
+		else if (invalid.length) problem = __("Check these numbers: {0}", [invalid.join(", ")]);
+		else if (variables.length)
+			problem = __("{0} can't be filled in a test, since there is no file. Type the real words instead.", [
+				variables.map((v) => `{${v}}`).join(", "),
+			]);
+		this.notice(problem, "warn");
+		this.$send.prop("disabled", !!problem || !this.numbers.length || !message.trim());
+		this.$send
+			.find("span")
+			.text(this.numbers.length > 1 ? __("Send test to {0} numbers", [this.numbers.length]) : __("Send test"));
+		this.console.phone.show(message, this.console.signature);
+	}
+
+	notice(text, kind = "error") {
+		this.$root
+			.find(".usms-quick-notice")
+			.attr("class", `usms-notice usms-quick-notice ${text ? `show ${kind}` : ""}`)
+			.text(text || "");
+	}
+
+	async send() {
+		this.$send.addClass("loading");
+		this.notice("");
+		try {
+			const r = await UsmsApi.call("quick_send", { numbers: this.numbers.join("\n"), message: this.$message.val() });
+			this.show_results(r.results || []);
+			this.console.load_recent();
+		} catch (error) {
+			this.notice(error);
+		} finally {
+			this.$send.removeClass("loading");
 		}
 	}
 
-	handle_error(error) {
-		console.error(error);
-
-		let message = "Something went wrong.";
-
-		if (error?.message) {
-			message = error.message;
-		} else if (typeof error === "string") {
-			message = error;
-		}
-
-		frappe.msgprint({
-			title: "Error",
-			message,
-			indicator: "red",
+	show_results(results) {
+		const sent = results.filter((r) => r.status === "Sent").length;
+		const $card = this.$root.find(".usms-results").show();
+		$card.find(".usms-results-sub").text(__("{0} of {1} delivered to TextSMS", [sent, results.length]));
+		$card.find(".usms-list").html(
+			results
+				.map(
+					(r) => `<div class="usms-list-item">
+						<div class="usms-list-main">
+							<div class="usms-list-title">${esc(r.mobile)}</div>
+							${r.status === "Sent" ? "" : `<div class="usms-list-sub">${esc((r.error_message || "").split("\n").pop())}</div>`}
+						</div>
+						<span class="usms-status-pill ${USMS_STATUS_COLOURS[r.status] || ""}">${esc(__(r.status))}</span>
+					</div>`
+				)
+				.join("")
+		);
+		frappe.show_alert({
+			message: sent === results.length ? __("Test sent") : __("Some numbers failed"),
+			indicator: sent === results.length ? "green" : "orange",
 		});
+	}
+}
 
-		this.append_stream(`Error: ${message}`);
+/** The page: header, tabs, and the shared side column. */
+class UpeoSmsConsole {
+	constructor(wrapper) {
+		this.wrapper = wrapper;
+		frappe.ui.make_app_page({ parent: wrapper, single_column: true, title: __("SMS Console") });
+		$(wrapper).addClass("usms-host");
+		this.$body = $(wrapper).find(".layout-main-section");
+		this.sender = {};
+		this.signature = "";
+		this.quick_send_limit = 10;
+		this.load();
+	}
+
+	async load() {
+		this.$body.html(`<div class="usms"><div class="usms-empty">${__("Loading…")}</div></div>`);
+		try {
+			const ctx = await UsmsApi.call("get_console_context");
+			this.sender = ctx.sender || {};
+			this.signature = ctx.signature || "";
+			this.quick_send_limit = ctx.quick_send_limit || 10;
+			this.render();
+			this.recent.render(ctx.recent_campaigns);
+		} catch (error) {
+			this.$body.html(`<div class="usms"><div class="usms-card"><div class="usms-empty">${esc(error)}</div></div></div>`);
+		}
+	}
+
+	render() {
+		const source_text = {
+			own: __("this site's own account"),
+			shared: __("shared account"),
+			missing: __("no SMS account set up"),
+		}[this.sender.source];
+		this.$body.html(`
+			<div class="usms">
+				<header class="usms-hero">
+					<div class="usms-brand">
+						<div class="usms-logo">${USMS_ICONS.logo}</div>
+						<div><h1>${__("Upeo SMS")}</h1><p>${__("Reach everyone with one message.")}</p></div>
+					</div>
+					<div class="usms-sender" title="${esc(source_text)}">
+						<span class="usms-dot ${esc(this.sender.source)}"></span>
+						<span>${__("Sending as")} <b>${esc(this.sender.sender_id || "—")}</b></span>
+						<a class="usms-link-btn" href="/app/upeosms-settings">${__("Settings")}</a>
+					</div>
+				</header>
+				<nav class="usms-tabs">
+					<button class="usms-tab active" data-tab="bulk">${__("Bulk campaign")}</button>
+					<button class="usms-tab" data-tab="quick">${__("Quick send")}</button>
+				</nav>
+				<div class="usms-layout">
+					<div class="usms-main">
+						<section class="usms-panel active" data-panel="bulk"></section>
+						<section class="usms-panel" data-panel="quick"></section>
+					</div>
+					<aside class="usms-side">
+						<div class="usms-phone-slot"></div>
+						<div class="usms-status-slot"></div>
+						<div class="usms-recent-slot"></div>
+					</aside>
+				</div>
+			</div>
+		`);
+		const $root = this.$body.find(".usms");
+		this.phone = new UsmsPhonePreview($root.find(".usms-phone-slot"), this.sender);
+		this.status = new UsmsCampaignStatus($root.find(".usms-status-slot"));
+		this.status.on_finished = () => this.load_recent();
+		this.recent = new UsmsRecentCampaigns($root.find(".usms-recent-slot"));
+		this.panels = {
+			bulk: new UsmsBulkPanel($root.find("[data-panel=bulk]"), this),
+			quick: new UsmsQuickPanel($root.find("[data-panel=quick]"), this),
+		};
+		$root.find(".usms-tab").on("click", (e) => this.switch_tab($(e.currentTarget).data("tab")));
+		this.panels.bulk.on_show();
+	}
+
+	switch_tab(tab) {
+		const $root = this.$body.find(".usms");
+		$root.find(".usms-tab").removeClass("active").filter(`[data-tab=${tab}]`).addClass("active");
+		$root.find(".usms-panel").removeClass("active").filter(`[data-panel=${tab}]`).addClass("active");
+		$root.find(".usms-status-slot").toggle(tab === "bulk");
+		this.panels[tab].on_show();
+	}
+
+	signature_note() {
+		return this.signature
+			? __("Signed {0} automatically", [`<b>${esc(this.signature)}</b>`])
+			: `${__("No signature")} · <a href="/app/upeosms-settings">${__("add one")}</a>`;
+	}
+
+	async load_recent() {
+		try {
+			const ctx = await UsmsApi.call("get_console_context");
+			this.recent.render(ctx.recent_campaigns);
+		} catch (e) {
+			console.error(e);
+		}
 	}
 }

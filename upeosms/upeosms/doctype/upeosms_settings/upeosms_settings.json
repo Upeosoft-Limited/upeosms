@@ -5,6 +5,10 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "sender_section",
+  "sender_html",
+  "sms_signature",
+  "sending_section",
   "default_batch_size",
   "default_queue",
   "max_retries",
@@ -13,6 +17,28 @@
   "allow_xlsx"
  ],
  "fields": [
+  {
+   "fieldname": "sender_section",
+   "fieldtype": "Section Break",
+   "label": "Sender"
+  },
+  {
+   "fieldname": "sender_html",
+   "fieldtype": "HTML",
+   "label": "Sender ID"
+  },
+  {
+   "fieldname": "sms_signature",
+   "fieldtype": "Data",
+   "label": "SMS Signature",
+   "length": 60,
+   "description": "Added on its own line at the end of every SMS sent from the SMS console, e.g. KSF Kitengela. Leave empty for no signature."
+  },
+  {
+   "fieldname": "sending_section",
+   "fieldtype": "Section Break",
+   "label": "Sending"
+  },
   {
    "fieldname": "default_batch_size",
    "fieldtype": "Int",
@@ -49,7 +75,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-04-20 10:35:06.849450",
+ "modified": "2026-10-05 16:00:00.000000",
  "modified_by": "Administrator",
  "module": "UPEOSMS",
  "name": "UPEOSMS Settings",
