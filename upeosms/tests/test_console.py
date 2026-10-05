@@ -8,7 +8,9 @@ from upeosms.services.campaign_history import CampaignHistory
 from upeosms.services.campaign_report import CampaignReport
 from upeosms.services.campaign_retry import CampaignRetry
 from upeosms.services.console_settings import ConsoleSettings
+from upeosms.services.desk_icon import DeskIconBranding
 from upeosms.services.message_composer import MessageComposer
+from upeosms.services.message_log import MessageLog
 from upeosms.services.quick_send import QuickSend
 from upeosms.services.sample_file import SampleRecipientFile
 from upeosms.services.sender_profile import SenderProfile
@@ -308,3 +310,73 @@ class TestCampaignHistory(IntegrationTestCase):
 			page_one = CampaignHistory("History").page()
 		self.assertEqual(len(page_one["campaigns"]), 1)
 		self.assertTrue(page_one["has_more"])
+
+
+class TestMessageLog(IntegrationTestCase):
+	def setUp(self):
+		self.campaign = frappe.get_doc(
+			{"doctype": "SMS Campaign", "campaign_name": "Message log test", "status": "Completed"}
+		).insert(ignore_permissions=True)
+		for idx, (mobile, name, status) in enumerate(
+			[("0712345678", "Grace Njeri", "Sent"), ("254799888777", "Peter Kamau", "Failed")], start=1
+		):
+			frappe.get_doc(
+				{
+					"doctype": "SMS Recipient",
+					"campaign": self.campaign.name,
+					"row_index": idx,
+					"mobile": mobile,
+					"recipient_name": name,
+					"status": status,
+					"rendered_message": f"Hello {name}",
+				}
+			).insert(ignore_permissions=True)
+
+	def tearDown(self):
+		frappe.db.delete("SMS Recipient", {"campaign": self.campaign.name})
+		frappe.db.delete("SMS Campaign", {"name": self.campaign.name})
+
+	def _mobiles(self, search=None, status=None):
+		rows = MessageLog(search, status).page()["messages"]
+		return [r.mobile for r in rows if r.campaign == self.campaign.name]
+
+	def test_search_by_name(self):
+		self.assertEqual(self._mobiles("Grace"), ["0712345678"])
+
+	def test_search_by_number_in_another_format(self):
+		self.assertEqual(self._mobiles("+254 712 345 678"), ["0712345678"])
+		self.assertEqual(self._mobiles("0799888777"), ["254799888777"])
+
+	def test_status_filter(self):
+		self.assertEqual(self._mobiles("Peter", "Failed"), ["254799888777"])
+		self.assertEqual(self._mobiles("Peter", "Sent"), [])
+
+	def test_carries_campaign_title(self):
+		row = next(r for r in MessageLog("Grace").page()["messages"] if r.campaign == self.campaign.name)
+		self.assertEqual(row.campaign_title, "Message log test")
+
+	def test_endpoint_refuses_guests(self):
+		with self.set_user("Guest"), self.assertRaises(frappe.PermissionError):
+			page.get_messages()
+
+
+class TestDeskIconBranding(IntegrationTestCase):
+	def setUp(self):
+		if not frappe.db.exists("Desktop Icon", "UPEO SMS"):
+			self.skipTest("Site has no UPEO SMS desktop icon")
+		self.before = frappe.db.get_value("Desktop Icon", "UPEO SMS", "logo_url")
+
+	def tearDown(self):
+		frappe.db.set_value("Desktop Icon", "UPEO SMS", "logo_url", self.before)
+
+	def test_sets_logo_once(self):
+		branding = DeskIconBranding("UPEO SMS", "/assets/upeosms/images/upeosms-icon.svg")
+		branding.apply()
+		self.assertEqual(
+			frappe.db.get_value("Desktop Icon", "UPEO SMS", "logo_url"),
+			"/assets/upeosms/images/upeosms-icon.svg",
+		)
+		self.assertFalse(branding.apply())
+
+	def test_missing_icon_is_ignored(self):
+		self.assertFalse(DeskIconBranding("No such tile", "/x.svg").apply())

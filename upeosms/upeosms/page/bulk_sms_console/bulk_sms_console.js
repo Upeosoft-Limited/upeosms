@@ -1063,6 +1063,108 @@ class UsmsHistoryPanel {
 	}
 }
 
+/** Every message sent, searchable by phone number or name. */
+class UsmsMessagesPanel {
+	static FILTERS = [
+		["", __("All")],
+		["Sent", __("Sent")],
+		["Failed", __("Failed")],
+		["Pending", __("Waiting")],
+	];
+
+	constructor($root, console) {
+		this.$root = $root;
+		this.console = console;
+		this.status = "";
+		this.rows = [];
+		this.render();
+		this.$search = this.$root.find(".usms-messages-search");
+		this.$search.on("input", frappe.utils.debounce(() => this.load(), 300));
+		this.$root.on("click", "[data-status]", (e) => {
+			this.status = $(e.currentTarget).data("status");
+			this.$root.find("[data-status]").removeClass("active").filter(e.currentTarget).addClass("active");
+			this.load();
+		});
+		this.$root.on("click", ".usms-more", () => this.load(true));
+		this.$root.on("click", "[data-campaign]", (e) => this.console.open_campaign($(e.currentTarget).data("campaign")));
+		this.$root.on("mouseenter focusin", "[data-index]", (e) => this.preview(this.rows[$(e.currentTarget).data("index")]));
+	}
+
+	render() {
+		this.$root.html(`
+			<div class="usms-card">
+				<div class="usms-card-head">
+					<div><h2>${__("Messages")}</h2><p>${__("Find what was sent to anyone, and whether it arrived.")}</p></div>
+				</div>
+				<div class="usms-history-tools">
+					<input class="usms-input usms-messages-search" type="search" inputmode="search"
+						placeholder="${__("Search by phone number or name")}">
+					<div class="usms-segment">
+						${UsmsMessagesPanel.FILTERS.map(
+							([value, label]) =>
+								`<button type="button" data-status="${value}" class="${value === "" ? "active" : ""}">${label}</button>`
+						).join("")}
+					</div>
+				</div>
+				<div class="usms-messages-list"></div>
+			</div>
+		`);
+	}
+
+	on_show() {
+		this.load();
+	}
+
+	async load(more = false) {
+		const start = more ? this.rows.length : 0;
+		try {
+			const r = await UsmsApi.call("get_messages", { search: this.$search.val(), status: this.status, start });
+			this.rows = more ? this.rows.concat(r.messages) : r.messages;
+			this.render_list(r.has_more);
+			if (!more) this.preview(this.rows[0]);
+		} catch (error) {
+			this.$root.find(".usms-messages-list").html(`<div class="usms-notice show error">${esc(error)}</div>`);
+		}
+	}
+
+	preview(row) {
+		if (!row) return this.console.phone.show("", "");
+		this.console.phone.show(row.rendered_message || "", "", __("To {0}", [row.recipient_name || row.mobile]));
+	}
+
+	render_list(has_more) {
+		const $list = this.$root.find(".usms-messages-list");
+		if (!this.rows.length) {
+			$list.html(`<div class="usms-empty">${__("No messages match.")}</div>`);
+			return;
+		}
+		$list.html(`
+			<div class="usms-message-list">
+				${this.rows
+					.map(
+						(m, i) => `<button type="button" class="usms-message" data-index="${i}" data-campaign="${esc(m.campaign)}">
+							<div class="usms-avatar usms-avatar-sm">${esc((m.recipient_name || m.mobile || "?").charAt(0).toUpperCase())}</div>
+							<div class="usms-message-main">
+								<div class="usms-history-row">
+									<div class="usms-list-title">${esc(m.recipient_name || m.mobile)}</div>
+									<span class="usms-list-sub">${esc(frappe.datetime.prettyDate(m.sent_on || m.modified))}</span>
+								</div>
+								<div class="usms-message-text">${esc(m.rendered_message || "")}</div>
+								<div class="usms-history-row usms-list-sub">
+									<span>${m.recipient_name ? `${esc(m.mobile)} · ` : ""}${esc(m.campaign_title)}</span>
+									<span class="usms-status-pill ${(USMS_STATUS_COLOURS[m.status] || "").replace("live", "")}">${esc(__(m.status))}</span>
+								</div>
+								${m.status === "Failed" && m.error_message ? `<div class="usms-error-text usms-list-sub">${esc(m.error_message)}</div>` : ""}
+							</div>
+						</button>`
+					)
+					.join("")}
+			</div>
+			${has_more ? `<div class="usms-actions"><button class="usms-btn usms-more" type="button">${__("Show more")}</button></div>` : ""}
+		`);
+	}
+}
+
 /** The page: header, tabs, and the shared side column. */
 class UpeoSmsConsole {
 	constructor(wrapper) {
@@ -1118,6 +1220,7 @@ class UpeoSmsConsole {
 					<button class="usms-tab active" data-tab="bulk">${__("Bulk campaign")}</button>
 					<button class="usms-tab" data-tab="quick">${__("Quick send")}</button>
 					<button class="usms-tab" data-tab="history">${__("History")}</button>
+					<button class="usms-tab" data-tab="messages">${__("Messages")}</button>
 					<button class="usms-tab" data-tab="settings">${__("Settings")}</button>
 				</nav>
 				<div class="usms-layout">
@@ -1125,6 +1228,7 @@ class UpeoSmsConsole {
 						<section class="usms-panel active" data-panel="bulk"></section>
 						<section class="usms-panel" data-panel="quick"></section>
 						<section class="usms-panel" data-panel="history"></section>
+						<section class="usms-panel" data-panel="messages"></section>
 						<section class="usms-panel" data-panel="settings"></section>
 						<section class="usms-panel" data-panel="campaign"></section>
 					</div>
@@ -1146,6 +1250,7 @@ class UpeoSmsConsole {
 			bulk: new UsmsBulkPanel($root.find("[data-panel=bulk]"), this),
 			quick: new UsmsQuickPanel($root.find("[data-panel=quick]"), this),
 			history: new UsmsHistoryPanel($root.find("[data-panel=history]"), this),
+			messages: new UsmsMessagesPanel($root.find("[data-panel=messages]"), this),
 			settings: new UsmsSettingsPanel($root.find("[data-panel=settings]"), this),
 			campaign: new UsmsCampaignPanel($root.find("[data-panel=campaign]"), this),
 		};

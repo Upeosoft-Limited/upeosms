@@ -1180,6 +1180,66 @@ button.usms-list-item:focus-visible,
 	flex-wrap: wrap;
 }
 
+/* Messages */
+.usms-message-list {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.usms-message {
+	display: flex;
+	gap: 14px;
+	align-items: flex-start;
+	width: 100%;
+	text-align: left;
+	font: inherit;
+	padding: 14px 16px;
+	border-radius: 14px;
+	border: 1px solid var(--usms-border);
+	background: var(--usms-surface-2);
+	cursor: pointer;
+	animation: usms-in 0.3s var(--usms-ease);
+	transition:
+		border-color 0.2s var(--usms-ease),
+		box-shadow 0.2s var(--usms-ease),
+		background 0.2s var(--usms-ease);
+}
+
+.usms-message:hover,
+.usms-message:focus-visible {
+	border-color: var(--usms-accent);
+	background: var(--usms-surface);
+	box-shadow: var(--usms-shadow);
+	outline: none;
+}
+
+.usms-avatar-sm {
+	width: 36px;
+	height: 36px;
+	flex: none;
+	font-size: 14px;
+}
+
+.usms-message-main {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.usms-message-text {
+	font-size: 13.5px;
+	line-height: 1.5;
+	color: var(--usms-text);
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+	white-space: pre-line;
+}
+
 @media (max-width: 1100px) {
 	.usms-layout {
 		grid-template-columns: 1fr;

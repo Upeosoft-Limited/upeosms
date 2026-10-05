@@ -8,6 +8,7 @@ from upeosms.services.campaign_report import CampaignReport
 from upeosms.services.campaign_retry import CampaignRetry
 from upeosms.services.console_settings import ConsoleSettings
 from upeosms.services.message_composer import MessageComposer
+from upeosms.services.message_log import MessageLog
 from upeosms.services.quick_send import QuickSend
 from upeosms.services.sample_file import SampleRecipientFile
 from upeosms.services.sender_profile import SenderProfile
@@ -58,6 +59,12 @@ def get_campaign_detail(campaign_name: str, status: str | None = None, start: in
 def get_campaigns(search: str | None = None, status: str | None = None, start: int = 0):
     _require_sms_access()
     return CampaignHistory(search, status).page(start)
+
+
+@frappe.whitelist()
+def get_messages(search: str | None = None, status: str | None = None, start: int = 0):
+    _require_sms_access()
+    return MessageLog(search, status).page(start)
 
 
 @frappe.whitelist()
