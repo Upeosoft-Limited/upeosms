@@ -249,3 +249,10 @@ app_include_js = "/assets/upeosms/js/upeosms_desk.js"
 # ignore_translatable_strings_from = []
 
 after_migrate = ["upeosms.services.desk_icon.after_migrate"]
+
+scheduler_events = {
+	"cron": {
+		# Keep the SMS balance fresh and send low-balance alerts.
+		"*/10 * * * *": ["upeosms.services.balance_monitor.scheduled_check"],
+	},
+}

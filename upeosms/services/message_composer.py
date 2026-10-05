@@ -22,4 +22,5 @@ class MessageComposer:
 		# Already signed by hand: don't sign twice.
 		if not self.signature or not message or message.endswith(self.signature):
 			return message
-		return f"{message}\n{self.signature}"
+		# A blank line sets the signature apart from the message.
+		return f"{message}\n\n{self.signature}"

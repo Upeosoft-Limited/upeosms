@@ -1336,6 +1336,117 @@ button.usms-list-item:focus-visible,
 	font-weight: 600;
 }
 
+/* Balance and alerts */
+.usms-balance-pill {
+	padding: 4px 10px;
+	border-radius: 999px;
+	font-size: 12px;
+	font-weight: 600;
+	background: var(--usms-success-soft);
+	color: var(--usms-success);
+	font-variant-numeric: tabular-nums;
+}
+
+.usms-balance-pill.low {
+	background: var(--usms-danger-soft);
+	color: var(--usms-danger);
+}
+
+.usms-balance {
+	display: flex;
+	align-items: center;
+	gap: 16px;
+	padding: 16px 18px;
+	border-radius: 14px;
+	background: var(--usms-surface-2);
+	margin-bottom: 18px;
+}
+
+.usms-balance-value {
+	font-size: 30px;
+	font-weight: 700;
+	letter-spacing: -0.02em;
+	color: var(--usms-text);
+	font-variant-numeric: tabular-nums;
+	line-height: 1.1;
+}
+
+.usms-balance-value small {
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--usms-muted);
+	letter-spacing: 0;
+}
+
+.usms-switch {
+	display: inline-flex;
+	align-items: center;
+	gap: 12px;
+	cursor: pointer;
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--usms-text);
+	margin: 0 0 16px;
+}
+
+.usms-switch input {
+	position: absolute;
+	opacity: 0;
+	pointer-events: none;
+}
+
+.usms-switch-track {
+	position: relative;
+	width: 42px;
+	height: 24px;
+	border-radius: 999px;
+	background: var(--usms-border);
+	transition: background 0.25s var(--usms-ease);
+	flex: none;
+}
+
+.usms-switch-thumb {
+	position: absolute;
+	top: 3px;
+	left: 3px;
+	width: 18px;
+	height: 18px;
+	border-radius: 50%;
+	background: #fff;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+	transition: transform 0.25s var(--usms-ease);
+}
+
+.usms-switch input:checked + .usms-switch-track {
+	background: linear-gradient(135deg, var(--usms-accent), var(--usms-accent-2));
+}
+
+.usms-switch input:checked + .usms-switch-track .usms-switch-thumb {
+	transform: translateX(18px);
+}
+
+.usms-switch input:focus-visible + .usms-switch-track {
+	outline: 2px solid var(--usms-accent);
+	outline-offset: 2px;
+}
+
+.usms-switch input:disabled + .usms-switch-track {
+	opacity: 0.5;
+}
+
+.usms-alert-fields {
+	transition: opacity 0.25s var(--usms-ease);
+}
+
+.usms-alert-fields.off {
+	opacity: 0.55;
+}
+
+.usms-token.reached {
+	background: var(--usms-warn-soft);
+	color: var(--usms-warn);
+}
+
 @media (max-width: 1100px) {
 	.usms-layout {
 		grid-template-columns: 1fr;

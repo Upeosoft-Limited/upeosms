@@ -3,6 +3,8 @@ import json
 import frappe
 from frappe import _
 
+from upeosms.services.balance_alerts import BalanceAlertSettings
+from upeosms.services.balance_monitor import build_monitor
 from upeosms.services.campaign_history import CampaignHistory
 from upeosms.services.campaign_report import CampaignReport
 from upeosms.services.campaign_retry import CampaignRetry
@@ -30,6 +32,7 @@ def get_console_context():
         "signature_max_lines": ConsoleSettings.MAX_LINES,
         "organisation": ConsoleSettings.organisation_name(),
         "can_edit_settings": bool(frappe.has_permission("UPEOSMS Settings", "write")),
+        "balance_alerts": BalanceAlertSettings().as_dict(),
         "recent_campaigns": frappe.get_all(
             "SMS Campaign",
             fields=["name", "campaign_name", "status", "total_recipients", "sent_count", "failed_count", "creation"],
@@ -55,6 +58,20 @@ def save_signature(signature: str | None = None):
 def get_campaign_detail(campaign_name: str, status: str | None = None, start: int = 0):
     _require_sms_access()
     return CampaignReport(campaign_name).as_dict(status=status, start=start)
+
+
+@frappe.whitelist()
+def save_balance_alerts(enabled: int = 0, thresholds: str | None = None, recipients: str | None = None):
+    _require_sms_access()
+    return BalanceAlertSettings().save(enabled, thresholds, recipients)
+
+
+@frappe.whitelist()
+def check_balance_now():
+    """Fetch the balance now. Sends an alert too, if a set level has been reached."""
+    _require_sms_access()
+    result = build_monitor().check()
+    return {"balance": result["balance"], "alert_sent": bool(result["alert"]), **BalanceAlertSettings().as_dict()}
 
 
 @frappe.whitelist()

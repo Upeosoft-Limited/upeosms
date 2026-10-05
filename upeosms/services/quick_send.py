@@ -22,10 +22,13 @@ class QuickSend:
 	LIMIT = 10
 	SEPARATORS = re.compile(r"[\s,;]+")
 
-	def __init__(self, numbers: str, message: str, composer: MessageComposer):
+	def __init__(
+		self, numbers: str, message: str, composer: MessageComposer, campaign_title: str | None = None
+	):
 		self.numbers = self._parse_numbers(numbers)
 		self.template = (message or "").strip()
 		self.composer = composer
+		self.campaign_title = campaign_title
 
 	def send(self) -> dict:
 		self._validate()
@@ -73,9 +76,7 @@ class QuickSend:
 		campaign = frappe.get_doc(
 			{
 				"doctype": "SMS Campaign",
-				"campaign_name": _("Test send {0}").format(
-					frappe.utils.now_datetime().strftime("%d %b %Y %H:%M")
-				),
+				"campaign_name": self._campaign_name(),
 				"message_template": self.template,
 				"status": "Queued",
 				"total_recipients": len(self.numbers),
@@ -99,6 +100,10 @@ class QuickSend:
 
 		frappe.db.commit()
 		return campaign
+
+	def _campaign_name(self) -> str:
+		stamp = frappe.utils.now_datetime().strftime("%d %b %Y %H:%M")
+		return f"{self.campaign_title or _('Test send')} {stamp}"
 
 	@staticmethod
 	def _results(campaign_name: str) -> list[dict]:

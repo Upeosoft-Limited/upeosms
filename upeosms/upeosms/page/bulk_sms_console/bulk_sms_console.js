@@ -99,7 +99,7 @@ class UsmsText {
 	static sign(message, signature) {
 		message = (message || "").trimEnd();
 		if (!signature || !message || message.endsWith(signature)) return message;
-		return `${message}\n${signature}`;
+		return `${message}\n\n${signature}`;
 	}
 
 	static segments(text) {
@@ -145,7 +145,7 @@ class UsmsPhonePreview {
 		}
 		const text = body.trimEnd();
 		const signed = UsmsText.sign(text, signature);
-		const sig = signed === text ? "" : `\n<span class="usms-bubble-sig">${esc(signature)}</span>`;
+		const sig = signed === text ? "" : `\n\n<span class="usms-bubble-sig">${esc(signature)}</span>`;
 		this.$bubble.removeClass("placeholder").html(esc(text) + sig);
 		const seg = UsmsText.segments(signed);
 		this.$meta.text(
@@ -698,6 +698,250 @@ class UsmsQuickPanel {
 	}
 }
 
+/** A small chip input: type a value, press Enter or comma, remove with ×. */
+class UsmsTokenField {
+	constructor($root, { placeholder, validate, sort, inputmode = "text", disabled = false, on_change }) {
+		this.$root = $root;
+		this.values = [];
+		this.validate = validate || (() => true);
+		this.sort = sort;
+		this.on_change = on_change || (() => {});
+		$root.addClass("usms-tokens").html(
+			`<input type="text" inputmode="${inputmode}" placeholder="${esc(placeholder)}" ${disabled ? "disabled" : ""}>`
+		);
+		this.$input = $root.find("input");
+		$root.on("click", () => this.$input.trigger("focus"));
+		this.$input.on("keydown", (e) => {
+			if (["Enter", ",", " ", "Tab"].includes(e.key) && this.$input.val().trim()) {
+				e.preventDefault();
+				this.add(this.$input.val());
+			} else if (e.key === "Backspace" && !this.$input.val() && this.values.length) {
+				this.remove(this.values.length - 1);
+			}
+		});
+		this.$input.on("blur", () => {
+			if (this.$input.val().trim()) this.add(this.$input.val());
+		});
+		this.$input.on("paste", (e) => {
+			e.preventDefault();
+			this.add(e.originalEvent.clipboardData.getData("text"));
+		});
+		$root.on("click", ".usms-token button", (e) => {
+			e.stopPropagation();
+			this.remove(cint($(e.currentTarget).closest(".usms-token").data("i")));
+		});
+	}
+
+	set(values) {
+		this.values = [...values].map(String);
+		this.render();
+	}
+
+	add(text) {
+		String(text)
+			.split(/[\s,;]+/)
+			.map((v) => v.trim())
+			.filter((v) => v && !this.values.includes(v))
+			.forEach((v) => this.values.push(v));
+		if (this.sort) this.values.sort(this.sort);
+		this.$input.val("");
+		this.render();
+		this.on_change();
+	}
+
+	remove(index) {
+		this.values.splice(index, 1);
+		this.render();
+		this.on_change();
+	}
+
+	invalid() {
+		return this.values.filter((v) => !this.validate(v));
+	}
+
+	render(extra_class = () => "") {
+		this.$root.find(".usms-token").remove();
+		this.values.forEach((v, i) => {
+			$(`<span class="usms-token ${this.validate(v) ? "" : "invalid"} ${extra_class(v)}" data-i="${i}">${esc(
+				v
+			)}<button type="button" aria-label="${__("Remove")}">×</button></span>`).insertBefore(this.$input);
+		});
+	}
+}
+
+/** The SMS balance and who is told when it runs low. */
+class UsmsBalanceCard {
+	constructor($root, console) {
+		this.$root = $root;
+		this.console = console;
+		this.state = console.balance_alerts || {};
+		this.render();
+		this.bind();
+		this.load(this.state);
+	}
+
+	render() {
+		const locked = !this.console.can_edit_settings;
+		this.$root.html(`
+			<div class="usms-card">
+				<div class="usms-card-head">
+					<div><h2>${__("SMS balance & alerts")}</h2><p>${__(
+						"Get a text when the balance falls to the levels you choose. Checked every 10 minutes."
+					)}</p></div>
+				</div>
+				<div class="usms-balance">
+					<div>
+						<div class="usms-eyebrow">${__("Balance")}</div>
+						<div class="usms-balance-value"><span class="usms-balance-number">—</span> <small>${__("units")}</small></div>
+						<div class="usms-list-sub usms-balance-checked"></div>
+					</div>
+					<div class="usms-spacer"></div>
+					<button type="button" class="usms-btn usms-balance-check">${__("Check now")}</button>
+				</div>
+
+				<label class="usms-switch">
+					<input type="checkbox" class="usms-alerts-enabled" ${locked ? "disabled" : ""}>
+					<span class="usms-switch-track"><span class="usms-switch-thumb"></span></span>
+					<span>${__("Send low balance alerts")}</span>
+				</label>
+
+				<div class="usms-alert-fields">
+					<div class="usms-field">
+						<label class="usms-label">${__("Alert when the balance falls to")}</label>
+						<div class="usms-levels"></div>
+						<div class="usms-meta"><span>${__("SMS units. Type a number and press Enter.")}</span><span class="usms-levels-note"></span></div>
+					</div>
+					<div class="usms-field">
+						<label class="usms-label">${__("Send alerts to")}</label>
+						<div class="usms-alert-numbers"></div>
+						<div class="usms-meta"><span>${__("Up to 10 phone numbers.")}</span></div>
+					</div>
+				</div>
+				<div class="usms-notice usms-balance-notice"></div>
+				<div class="usms-actions">
+					<button class="usms-btn primary usms-alerts-save" disabled ${locked ? "hidden" : ""}><span>${__(
+						"Save alerts"
+					)}</span></button>
+				</div>
+			</div>
+		`);
+		const on_change = () => this.refresh();
+		this.levels = new UsmsTokenField(this.$root.find(".usms-levels"), {
+			placeholder: __("e.g. 500"),
+			inputmode: "numeric",
+			validate: (v) => /^\d+$/.test(v) && cint(v) > 0,
+			sort: (a, b) => cint(b) - cint(a),
+			disabled: locked,
+			on_change,
+		});
+		this.numbers = new UsmsTokenField(this.$root.find(".usms-alert-numbers"), {
+			placeholder: __("07XX XXX XXX"),
+			inputmode: "tel",
+			validate: (v) => UsmsQuickPanel.KE_MOBILE.test(v.replace(/[\s-]/g, "")),
+			disabled: locked,
+			on_change,
+		});
+		this.$enabled = this.$root.find(".usms-alerts-enabled");
+		this.$save = this.$root.find(".usms-alerts-save");
+	}
+
+	bind() {
+		this.$enabled.on("change", () => this.refresh());
+		this.$save.on("click", () => this.save());
+		this.$root.find(".usms-balance-check").on("click", (e) => this.check($(e.currentTarget)));
+	}
+
+	load(state) {
+		this.state = { ...this.state, ...state };
+		this.$enabled.prop("checked", !!this.state.enabled);
+		this.levels.set(this.state.thresholds || []);
+		this.numbers.set(this.state.recipients || []);
+		this.show_balance();
+		this.refresh();
+	}
+
+	show_balance() {
+		const { balance, checked_on } = this.state;
+		const has = balance !== null && balance !== undefined && checked_on;
+		this.$root.find(".usms-balance-number").text(has ? format_number(balance, null, 0) : "—");
+		this.$root
+			.find(".usms-balance-checked")
+			.text(has ? __("Checked {0}", [frappe.datetime.prettyDate(checked_on)]) : __("Not checked yet"));
+		this.console.show_balance(this.state);
+	}
+
+	current() {
+		return {
+			enabled: this.$enabled.is(":checked") ? 1 : 0,
+			thresholds: this.levels.values.join(", "),
+			recipients: this.numbers.values.join("\n"),
+		};
+	}
+
+	refresh() {
+		const now = this.current();
+		const saved = {
+			enabled: this.state.enabled ? 1 : 0,
+			thresholds: (this.state.thresholds || []).join(", "),
+			recipients: (this.state.recipients || []).join("\n"),
+		};
+		this.$root.find(".usms-alert-fields").toggleClass("off", !now.enabled);
+		const balance = this.state.balance;
+		const reached = (v) => (balance !== null && balance !== undefined && cint(v) >= balance ? "reached" : "");
+		this.levels.render(reached);
+		this.numbers.render();
+		const reached_levels = this.levels.values.filter((v) => reached(v));
+		this.$root
+			.find(".usms-levels-note")
+			.text(reached_levels.length ? __("Already at or below: {0}", [reached_levels.join(", ")]) : "");
+		const problem = this.levels.invalid().length
+			? __("Balance levels must be whole numbers above zero.")
+			: this.numbers.invalid().length
+				? __("Check these numbers: {0}", [this.numbers.invalid().join(", ")])
+				: now.enabled && !this.levels.values.length
+					? __("Add at least one balance level.")
+					: now.enabled && !this.numbers.values.length
+						? __("Add at least one phone number.")
+						: "";
+		this.notice(problem, "warn");
+		const changed = JSON.stringify(now) !== JSON.stringify(saved);
+		this.$save.prop("disabled", !changed || !!problem);
+	}
+
+	notice(text, kind = "ok") {
+		this.$root
+			.find(".usms-balance-notice")
+			.attr("class", `usms-notice usms-balance-notice ${text ? `show ${kind}` : ""}`)
+			.text(text || "");
+	}
+
+	async save() {
+		this.$save.addClass("loading");
+		try {
+			const r = await UsmsApi.call("save_balance_alerts", this.current());
+			this.load(r);
+			this.notice(r.enabled ? __("Saved. Alerts are on.") : __("Saved. Alerts are off."));
+		} catch (error) {
+			this.notice(error, "error");
+		} finally {
+			this.$save.removeClass("loading");
+		}
+	}
+
+	async check($btn) {
+		$btn.addClass("loading");
+		try {
+			const r = await UsmsApi.call("check_balance_now");
+			this.load(r);
+			if (r.alert_sent) this.notice(__("The balance has reached an alert level, so an alert was sent."), "warn");
+		} catch (error) {
+			this.notice(error, "error");
+		} finally {
+			$btn.removeClass("loading");
+		}
+	}
+}
+
 /** Sender ID and signature, edited here instead of the desk settings form. */
 class UsmsSettingsPanel {
 	constructor($root, console) {
@@ -774,7 +1018,9 @@ class UsmsSettingsPanel {
 					<button class="usms-btn primary usms-sig-save" disabled><span>${__("Save signature")}</span></button>
 				</div>
 			</div>
+			<div class="usms-balance-slot"></div>
 		`);
+		this.balance = new UsmsBalanceCard(this.$root.find(".usms-balance-slot"), this.console);
 		this.$input = this.$root.find(".usms-signature");
 		this.$save = this.$root.find(".usms-sig-save");
 		this.$reset = this.$root.find(".usms-sig-reset");
@@ -1268,6 +1514,7 @@ class UpeoSmsConsole {
 			this.signature_limit = ctx.signature_limit || 100;
 			this.signature_max_lines = ctx.signature_max_lines || 3;
 			this.organisation = ctx.organisation || "";
+			this.balance_alerts = ctx.balance_alerts || {};
 			this.can_edit_settings = !!ctx.can_edit_settings;
 			this.render();
 			this.recent.render(ctx.recent_campaigns);
@@ -1293,6 +1540,7 @@ class UpeoSmsConsole {
 					<div class="usms-sender" title="${esc(source_text)}">
 						<span class="usms-dot ${esc(this.sender.source)}"></span>
 						<span>${__("Sending as")} <b>${esc(this.sender.sender_id || "—")}</b></span>
+						<span class="usms-balance-pill" hidden></span>
 						<button type="button" class="usms-link-btn usms-go-settings">${__("Settings")}</button>
 					</div>
 				</header>
@@ -1321,6 +1569,7 @@ class UpeoSmsConsole {
 			</div>
 		`);
 		const $root = this.$body.find(".usms");
+		this.show_balance(this.balance_alerts || {});
 		this.phone = new UsmsPhonePreview($root.find(".usms-phone-slot"), this.sender);
 		this.status = new UsmsCampaignStatus($root.find(".usms-status-slot"));
 		this.status.on_finished = () => this.load_recent();
@@ -1377,6 +1626,17 @@ class UpeoSmsConsole {
 		this.switch_tab("campaign", false);
 		this.panels.campaign.open(name);
 		if (update_path) this.set_path("campaign", name);
+	}
+
+	show_balance(state) {
+		const $pill = this.$body.find(".usms-balance-pill");
+		if (state.balance === null || state.balance === undefined || !state.checked_on) return $pill.prop("hidden", true);
+		const low = (state.thresholds || []).some((level) => state.balance <= level);
+		$pill
+			.prop("hidden", false)
+			.toggleClass("low", low)
+			.attr("title", __("Checked {0}", [frappe.datetime.prettyDate(state.checked_on)]))
+			.text(__("{0} units", [format_number(state.balance, null, 0)]));
 	}
 
 	signature_note() {
