@@ -1532,6 +1532,15 @@ class UpeoSmsConsole {
 		}[this.sender.source];
 		this.$body.html(`
 			<div class="usms">
+				<nav class="usms-crumbs" aria-label="${__("Breadcrumb")}">
+					<a href="/desk" class="usms-crumb">${frappe.utils.icon("home", "sm")} ${__("Apps")}</a>
+					<span class="usms-crumb-sep">›</span>
+					<a href="/desk/ksf" class="usms-crumb usms-crumb-ksf">
+						<img src="/assets/ksf/images/ksf-logo.png" alt="" onerror="this.remove()"> ${__("KSF")}
+					</a>
+					<span class="usms-crumb-sep">›</span>
+					<span class="usms-crumb current">${__("Upeo SMS")}</span>
+				</nav>
 				<header class="usms-hero">
 					<div class="usms-brand">
 						<div class="usms-logo">${USMS_ICONS.logo}</div>

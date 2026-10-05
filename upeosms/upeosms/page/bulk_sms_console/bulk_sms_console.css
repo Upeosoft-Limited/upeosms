@@ -70,6 +70,52 @@
 	box-sizing: border-box;
 }
 
+/* Breadcrumb back to the apps and KSF */
+.usms-crumbs {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-bottom: 14px;
+	font-size: 13px;
+}
+
+.usms-crumb {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 5px 10px;
+	border-radius: 999px;
+	color: var(--usms-muted);
+	font-weight: 600;
+	text-decoration: none !important;
+	transition: all 0.2s var(--usms-ease);
+}
+
+a.usms-crumb:hover {
+	background: var(--usms-surface);
+	color: var(--usms-accent);
+	box-shadow: var(--usms-shadow);
+}
+
+.usms-crumb img {
+	width: 18px;
+	height: 18px;
+	border-radius: 50%;
+}
+
+.usms-crumb .icon {
+	stroke: currentColor;
+}
+
+.usms-crumb.current {
+	color: var(--usms-text);
+}
+
+.usms-crumb-sep {
+	color: var(--usms-faint);
+}
+
 /* Header */
 .usms-hero {
 	display: flex;
