@@ -160,6 +160,17 @@ class TestConsoleSettings(IntegrationTestCase):
 		self.assertEqual(ConsoleSettings().save_signature("  KSF   Kitengela "), "KSF Kitengela")
 		self.assertEqual(MessageComposer.from_settings().signature, "KSF Kitengela")
 
+	def test_keeps_line_breaks_and_drops_blank_lines(self):
+		saved = ConsoleSettings().save_signature("God bless you,\n\n  KSF  Kitengela \n")
+		self.assertEqual(saved, "God bless you,\nKSF Kitengela")
+		self.assertEqual(
+			MessageComposer.from_settings().sign("Hello"), "Hello\nGod bless you,\nKSF Kitengela"
+		)
+
+	def test_rejects_too_many_lines(self):
+		with self.assertRaises(frappe.ValidationError):
+			ConsoleSettings().save_signature("a\nb\nc\nd")
+
 	def test_empty_clears_signature(self):
 		ConsoleSettings().save_signature("KSF")
 		self.assertEqual(ConsoleSettings().save_signature(""), "")

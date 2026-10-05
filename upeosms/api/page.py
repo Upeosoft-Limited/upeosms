@@ -27,6 +27,8 @@ def get_console_context():
         "signature": MessageComposer.from_settings().signature,
         "quick_send_limit": QuickSend.LIMIT,
         "signature_limit": ConsoleSettings.MAX_SIGNATURE,
+        "signature_max_lines": ConsoleSettings.MAX_LINES,
+        "organisation": ConsoleSettings.organisation_name(),
         "can_edit_settings": bool(frappe.has_permission("UPEOSMS Settings", "write")),
         "recent_campaigns": frappe.get_all(
             "SMS Campaign",

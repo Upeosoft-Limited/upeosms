@@ -29,10 +29,9 @@
   },
   {
    "fieldname": "sms_signature",
-   "fieldtype": "Data",
+   "fieldtype": "Small Text",
    "label": "SMS Signature",
-   "length": 60,
-   "description": "Added on its own line at the end of every SMS sent from the SMS console, e.g. KSF Kitengela. Leave empty for no signature."
+   "description": "Added on its own line(s) at the end of every SMS sent from the SMS console, e.g. KSF Kitengela. Up to 3 lines. Leave empty for no signature."
   },
   {
    "fieldname": "sending_section",
@@ -75,7 +74,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-05 16:00:00.000000",
+ "modified": "2026-10-05 17:00:00.000000",
  "modified_by": "Administrator",
  "module": "UPEOSMS",
  "name": "UPEOSMS Settings",

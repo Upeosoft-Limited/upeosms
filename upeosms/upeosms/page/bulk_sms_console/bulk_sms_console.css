@@ -1240,6 +1240,102 @@ button.usms-list-item:focus-visible,
 	white-space: pre-line;
 }
 
+/* Signature editor */
+.usms-editor {
+	border: 1px solid var(--usms-border);
+	border-radius: 14px;
+	background: var(--usms-surface-2);
+	overflow: hidden;
+	transition:
+		border-color 0.2s var(--usms-ease),
+		box-shadow 0.2s var(--usms-ease),
+		background 0.2s var(--usms-ease);
+}
+
+.usms-editor:focus-within {
+	border-color: var(--usms-accent);
+	background: var(--usms-surface);
+	box-shadow: 0 0 0 4px var(--usms-accent-soft);
+}
+
+.usms-editor.locked {
+	opacity: 0.6;
+}
+
+.usms-editor-bar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+	padding: 8px 10px;
+	border-bottom: 1px solid var(--usms-border);
+	background: var(--usms-surface);
+}
+
+.usms-editor-btn {
+	border: 1px solid var(--usms-border);
+	background: var(--usms-surface-2);
+	color: var(--usms-muted);
+	font-size: 12px;
+	font-weight: 600;
+	padding: 4px 10px;
+	border-radius: 999px;
+	cursor: pointer;
+	transition: all 0.2s var(--usms-ease);
+}
+
+.usms-editor-btn::before {
+	content: "+ ";
+	opacity: 0.6;
+}
+
+.usms-editor-clear::before {
+	content: "";
+}
+
+.usms-editor-btn:hover:not(:disabled) {
+	color: var(--usms-accent);
+	border-color: var(--usms-accent);
+	background: var(--usms-accent-soft);
+}
+
+.usms-editor-btn:disabled {
+	cursor: not-allowed;
+}
+
+.usms-editor-area {
+	display: block;
+	width: 100%;
+	border: none;
+	outline: none;
+	resize: none;
+	background: transparent;
+	color: var(--usms-text);
+	font-family: inherit;
+	font-size: 14.5px;
+	line-height: 1.6;
+	padding: 12px 14px;
+}
+
+.usms-editor-foot {
+	display: flex;
+	justify-content: space-between;
+	gap: 12px;
+	flex-wrap: wrap;
+	padding: 8px 14px 10px;
+	font-size: 12px;
+	color: var(--usms-faint);
+}
+
+.usms-sig-count {
+	font-variant-numeric: tabular-nums;
+}
+
+.usms-sig-count.over {
+	color: var(--usms-danger);
+	font-weight: 600;
+}
+
 @media (max-width: 1100px) {
 	.usms-layout {
 		grid-template-columns: 1fr;

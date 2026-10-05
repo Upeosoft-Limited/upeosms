@@ -343,7 +343,9 @@ class UsmsBulkPanel {
 	}
 
 	bind() {
-		this.$file.on("change", () => this.$file[0].files[0] && this.upload(this.$file[0].files[0]));
+		this.$file.on("change", () => {
+			if (this.$file[0].files[0]) this.upload(this.$file[0].files[0]);
+		});
 		this.$drop
 			.on("dragover", (e) => {
 				e.preventDefault();
@@ -585,7 +587,9 @@ class UsmsQuickPanel {
 			e.preventDefault();
 			this.add(e.originalEvent.clipboardData.getData("text"));
 		});
-		this.$input.on("blur", () => this.$input.val().trim() && this.add(this.$input.val()));
+		this.$input.on("blur", () => {
+			if (this.$input.val().trim()) this.add(this.$input.val());
+		});
 		this.$message.on("input", () => this.refresh());
 		this.$send.on("click", () => this.send());
 	}
@@ -735,16 +739,35 @@ class UsmsSettingsPanel {
 			<div class="usms-card">
 				<div class="usms-card-head">
 					<div><h2>${__("Signature")}</h2><p>${__(
-						"Added on its own line at the end of every SMS sent from this console."
+						"Added at the end of every SMS sent from this console. Up to {0} lines.",
+						[this.console.signature_max_lines]
 					)}</p></div>
 				</div>
-				<label class="usms-label">${__("Sign messages as")}</label>
-				<input class="usms-input usms-signature" type="text" maxlength="${limit}"
-					placeholder="${__("e.g. KSF Kitengela")}" ${locked ? "disabled" : ""}>
-				<div class="usms-meta">
-					<span>${locked ? __("Only a System Manager can change this.") : __("Leave empty to send without a signature.")}</span>
-					<span class="usms-sig-count"></span>
+				<div class="usms-editor ${locked ? "locked" : ""}">
+					<div class="usms-editor-bar" role="toolbar" aria-label="${__("Insert")}">
+						${this.snippets()
+							.map(
+								(text) =>
+									`<button type="button" class="usms-editor-btn" data-insert="${esc(text)}" ${
+										locked ? "disabled" : ""
+									}>${esc(text)}</button>`
+							)
+							.join("")}
+						<span class="usms-spacer"></span>
+						<button type="button" class="usms-editor-btn usms-editor-clear" ${locked ? "disabled" : ""}>${__("Clear")}</button>
+					</div>
+					<textarea class="usms-editor-area usms-signature" rows="3" maxlength="${limit}" spellcheck="true"
+						placeholder="${__("e.g.\nGod bless you,\nKSF Kitengela")}" ${locked ? "disabled" : ""}></textarea>
+					<div class="usms-editor-foot">
+						<span class="usms-sig-hint">${
+							locked
+								? __("Only a System Manager can change this.")
+								: __("Enter starts a new line · Ctrl+Enter saves")
+						}</span>
+						<span class="usms-sig-count"></span>
+					</div>
 				</div>
+				<div class="usms-notice usms-sig-warn"></div>
 				<div class="usms-notice usms-settings-notice"></div>
 				<div class="usms-actions">
 					<button class="usms-btn usms-sig-reset" disabled>${__("Undo changes")}</button>
@@ -757,9 +780,26 @@ class UsmsSettingsPanel {
 		this.$reset = this.$root.find(".usms-sig-reset");
 	}
 
+	// Quick inserts; the church's own name first when the site has one.
+	snippets() {
+		return [this.console.organisation, __("God bless you"), __("Blessings"), __("Regards")].filter(Boolean);
+	}
+
 	bind() {
 		this.$input.on("input", () => this.refresh());
-		this.$input.on("keydown", (e) => e.key === "Enter" && !this.$save.prop("disabled") && this.save());
+		// A block body on purpose: a jQuery handler that returns false cancels the
+		// keypress, which is what once stopped anyone typing in this field.
+		this.$input.on("keydown", (e) => {
+			if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+				e.preventDefault();
+				if (!this.$save.prop("disabled")) this.save();
+			}
+		});
+		this.$root.on("click", "[data-insert]", (e) => this.insert($(e.currentTarget).data("insert")));
+		this.$root.on("click", ".usms-editor-clear", () => {
+			this.$input.val("").trigger("focus");
+			this.refresh();
+		});
 		this.$save.on("click", () => this.save());
 		this.$reset.on("click", () => {
 			this.$input.val(this.console.signature);
@@ -773,16 +813,52 @@ class UsmsSettingsPanel {
 		this.refresh();
 	}
 
+	// Mirrors ConsoleSettings.tidy: collapse spaces per line, drop blank lines.
 	value() {
-		return this.$input.val().replace(/\s+/g, " ").trim();
+		return this.$input
+			.val()
+			.split("\n")
+			.map((line) => line.replace(/\s+/g, " ").trim())
+			.filter(Boolean)
+			.join("\n");
+	}
+
+	insert(text) {
+		const el = this.$input[0];
+		const before = el.value.slice(0, el.selectionStart).replace(/[ \t]+$/, "");
+		const after = el.value.slice(el.selectionEnd);
+		// Each snippet goes on its own line.
+		const piece = (before && !before.endsWith("\n") ? "\n" : "") + text;
+		el.value = (before + piece + after).slice(0, this.console.signature_limit);
+		el.focus();
+		el.selectionStart = el.selectionEnd = Math.min((before + piece).length, el.value.length);
+		this.refresh();
 	}
 
 	refresh() {
-		const changed = this.value() !== this.console.signature;
-		this.$root.find(".usms-sig-count").text(`${this.$input.val().length} / ${this.console.signature_limit}`);
-		this.$save.prop("disabled", !changed);
+		const value = this.value();
+		const lines = value ? value.split("\n").length : 0;
+		const max_lines = this.console.signature_max_lines;
+		const too_many = lines > max_lines;
+		const changed = value !== this.console.signature;
+		this.$input.attr("rows", Math.min(Math.max(lines, 3), 5));
+		this.$root
+			.find(".usms-sig-count")
+			.toggleClass("over", too_many)
+			.text(`${__("{0} lines", [lines])} · ${this.$input.val().length} / ${this.console.signature_limit}`);
+		const special = value && !UsmsText.GSM.test(value);
+		const warning = too_many
+			? __("Use {0} lines or fewer.", [max_lines])
+			: special
+				? __("This uses an emoji or special character, so each SMS fits 70 characters instead of 160.")
+				: "";
+		this.$root
+			.find(".usms-sig-warn")
+			.attr("class", `usms-notice usms-sig-warn ${warning ? "show warn" : ""}`)
+			.text(warning);
+		this.$save.prop("disabled", !changed || too_many);
 		this.$reset.prop("disabled", !changed);
-		this.console.phone.show(__("Your message goes here."), this.value(), __("Preview with this signature"));
+		this.console.phone.show(__("Your message goes here."), value, __("Preview with this signature"));
 	}
 
 	notice(text, kind = "ok") {
@@ -1175,7 +1251,9 @@ class UpeoSmsConsole {
 		this.sender = {};
 		this.signature = "";
 		this.quick_send_limit = 10;
-		this.signature_limit = 60;
+		this.signature_limit = 100;
+		this.signature_max_lines = 3;
+		this.organisation = "";
 		this.can_edit_settings = false;
 		this.load();
 	}
@@ -1187,7 +1265,9 @@ class UpeoSmsConsole {
 			this.sender = ctx.sender || {};
 			this.signature = ctx.signature || "";
 			this.quick_send_limit = ctx.quick_send_limit || 10;
-			this.signature_limit = ctx.signature_limit || 60;
+			this.signature_limit = ctx.signature_limit || 100;
+			this.signature_max_lines = ctx.signature_max_lines || 3;
+			this.organisation = ctx.organisation || "";
 			this.can_edit_settings = !!ctx.can_edit_settings;
 			this.render();
 			this.recent.render(ctx.recent_campaigns);
@@ -1301,7 +1381,7 @@ class UpeoSmsConsole {
 
 	signature_note() {
 		return this.signature
-			? __("Signed {0} automatically", [`<b>${esc(this.signature)}</b>`])
+			? __("Signed {0} automatically", [`<b>${esc(this.signature.split("\n").join(" · "))}</b>`])
 			: `${__("No signature")} · <a href="#" class="usms-go-settings">${__("add one")}</a>`;
 	}
 
