@@ -9,10 +9,13 @@ import requests
 DEFAULT_TEXTSMS_ENDPOINT = "https://sms.textsms.co.ke/api/services/sendsms/"
 
 
-@frappe.whitelist(allow_guest=True)
+# Deliberately NOT @frappe.whitelist. This was `allow_guest=True`, which let
+# anyone on the internet send any text to any number on the site's TextSMS
+# account. The only caller is server-side (upeosms.tasks), which needs no
+# whitelist. Keep it that way.
 def send_sms(mobile: str, message: str) -> Dict[str, Any]:
 	"""
-	Public API: Send an SMS via TextSMS.
+	Send an SMS via TextSMS. Server-side only.
 
 	Reads config from site_config.json:
 	  - textsms_api_key (required)
@@ -72,8 +75,9 @@ def _get_textsms_config() -> Dict[str, Any]:
 	  - textsms_endpoint_url (str)
 	  - textsms_timeout (int)
 	  - textsms_payload_mode ("form" or "json")  -> default "form"
+	  - textsms_site_keys_only (bool) - see _get_textsms_conf_source
 	"""
-	conf = frappe.get_conf()
+	conf = _get_textsms_conf_source()
 
 	cfg = {
 		"api_key": conf.get("textsms_api_key"),
@@ -95,6 +99,23 @@ def _get_textsms_config() -> Dict[str, Any]:
 		cfg["payload_mode"] = "form"
 
 	return cfg
+
+
+# Same guard as ksf.api.sms._get_textsms_conf_source. Duplicated because the
+# two apps are installed independently and neither may import the other.
+def _get_textsms_conf_source() -> dict[str, Any]:
+	"""
+	Return the config the TextSMS keys are read from.
+
+	Normally that is frappe.get_conf(), which falls back to the bench-wide
+	common_site_config.json, whose keys may belong to another site's account.
+	A site with `textsms_site_keys_only` set reads the keys from its own
+	site_config.json alone, so it fails instead of sending as someone else.
+	"""
+	conf = frappe.get_conf()
+	if not conf.get("textsms_site_keys_only"):
+		return conf
+	return frappe.get_file_json(frappe.get_site_path("site_config.json"))
 
 
 def _format_ke_mobile(mobile: Optional[str]) -> str:
